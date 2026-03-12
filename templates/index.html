@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <title>YOLO Model Manager</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+</head>
+<body>
+    <div class="layout">
+        <aside>
+            <div class="brand">
+                <div class="brand-badge">Y</div>
+                <span>YOLO Model Manager</span>
+            </div>
+            <nav>
+                <button class="active" data-target="hub">Model Hub</button>
+                <button data-target="testing">Model Testing</button>
+                <button data-target="settings">Einstellungen</button>
+            </nav>
+        </aside>
+
+        <main>
+            <h1>YOLO Modell Verwaltung</h1>
+            <p class="subtitle">Modelle laden, testen und Einstellungen verwalten – alles an einem Ort.</p>
+
+            <section id="hub" class="card tab-section">
+                <div class="section-header">
+                    <div>
+                        <h3 style="margin:0;">Model Hub</h3>
+                        <p class="subtitle" style="margin:4px 0 0;">Verfügbare Modelle im Dateisystem verwalten.</p>
+                    </div>
+                    <div class="pill" id="activeModelPill" style="display:none;">
+                        <span class="dot"></span>
+                        <span id="activeModelLabel"></span>
+                    </div>
+                </div>
+
+                <ul id="modelList" class="model-grid"></ul>
+
+                <div class="section-header" style="margin-top: 10px;">
+                    <small style="color:var(--muted);">Klicke auf „Laden", um ein Modell zu aktivieren. Das aktive Modell wird automatisch im Test-Tab vorausgefüllt.</small>
+                    <button class="action" onclick="updateModelList()">Liste aktualisieren</button>
+                </div>
+            </section>
+
+            <section id="testing" class="card tab-section">
+                <div class="section-header">
+                    <div>
+                        <h3 style="margin:0;">Model Testing</h3>
+                        <p class="subtitle" style="margin:4px 0 0;">Bild hochladen, Modell wählen, Ergebnis ansehen.</p>
+                    </div>
+                    <div class="pill" id="testStatusPill" style="display:none;">
+                        <span class="dot"></span>
+                        <span id="testStatusLabel">Bereit</span>
+                    </div>
+                </div>
+
+                <div class="test-grid">
+                    <div class="input-stack">
+                        <label class="field-label">Modell</label>
+                        <div class="input-row">
+                            <input type="text" id="selectedModel" placeholder="Modellname (z.B. yolov8n.pt)">
+                            <button class="ghost" onclick="updateModelList()">Aktualisieren</button>
+                        </div>
+
+                        <label class="field-label">Quelle</label>
+                        <div class="input-row">
+                            <button id="modeImage" class="ghost active" onclick="setMode('image')">Bild</button>
+                            <button id="modeVideo" class="ghost" onclick="setMode('video')">Video</button>
+                            <button id="modeUrl" class="ghost" onclick="setMode('url')">URL</button>
+                            <button id="modeWebcam" class="ghost" onclick="setMode('webcam')">Webcam</button>
+                            <button id="modeBatch" class="ghost" onclick="setMode('batch')">Batch</button>
+                        </div>
+
+                        <!-- Bild Input -->
+                        <div id="imageInputGroup" style="display:block;">
+                            <label class="field-label">Bild</label>
+                            <div class="dropzone" id="dropzone">
+                                <input type="file" id="imageInput" accept="image/*" hidden>
+                                <input type="file" id="videoInput" accept="video/*" hidden>
+                                <input type="file" id="batchInput" accept="image/*" multiple hidden>
+                                <p id="dropPrompt">Bild hier ablegen oder klicken zum Auswählen</p>
+                                <button class="ghost" onclick="triggerFile(event)">Datei wählen</button>
+                            </div>
+                            <small class="muted">Unterstützt: Einzelbild (JPEG/PNG/WebP).</small>
+                        </div>
+
+                        <!-- URL Input -->
+                        <div id="urlInputGroup" style="display:none;">
+                            <label class="field-label">Bild-URL oder Video-URL</label>
+                            <input type="text" id="urlInput" placeholder="https://ultralytics.com/images/bus.jpg">
+                            <small class="muted">Direkter Link zu einem Bild oder Video im Internet.</small>
+                        </div>
+
+                        <!-- Webcam Input -->
+                        <div id="webcamInputGroup" style="display:none;">
+                            <label class="field-label">Webcam-ID</label>
+                            <input type="number" id="webcamIdInput" value="0" min="0" max="10">
+                            <small class="muted">0 = Standard-Webcam. Stream wird für ~10 Sekunden geöffnet.</small>
+                        </div>
+
+                        <!-- Batch Input -->
+                        <div id="batchInputGroup" style="display:none;">
+                            <label class="field-label">Mehrere Bilder auswählen</label>
+                            <div class="dropzone" id="batchDropzone">
+                                <p>Mehrere Bilder hier ablegen oder klicken</p>
+                                <button class="ghost" onclick="document.getElementById('batchInput').click()">Dateien wählen</button>
+                            </div>
+                            <small class="muted">Batch-Inferenz verarbeitet mehrere Bilder auf einmal.</small>
+                        </div>
+
+                        <!-- Inferenz-Parameter -->
+                        <div style="margin-top:16px; padding:12px; background:#f8fafc; border-radius:10px; border:1px solid var(--border);">
+                            <label class="field-label" style="font-size:14px;">Inferenz-Parameter</label>
+                            <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-top:8px;">
+                                <div>
+                                    <label style="font-size:12px; color:var(--muted);">Confidence</label>
+                                    <input type="number" id="confThreshold" value="0.25" min="0" max="1" step="0.05" style="width:100%; padding:6px; border-radius:6px; border:1px solid var(--border);">
+                                </div>
+                                <div>
+                                    <label style="font-size:12px; color:var(--muted);">IoU</label>
+                                    <input type="number" id="iouThreshold" value="0.45" min="0" max="1" step="0.05" style="width:100%; padding:6px; border-radius:6px; border:1px solid var(--border);">
+                                </div>
+                                <div>
+                                    <label style="font-size:12px; color:var(--muted);">Image Size</label>
+                                    <input type="number" id="imgSize" value="640" min="320" max="1280" step="32" style="width:100%; padding:6px; border-radius:6px; border:1px solid var(--border);">
+                                </div>
+                            </div>
+                            <div style="display:flex; gap:12px; margin-top:8px;">
+                                <label style="display:flex; align-items:center; gap:6px; font-size:13px;">
+                                    <input type="checkbox" id="saveResults" checked>
+                                    Ergebnisse speichern
+                                </label>
+                                <label style="display:flex; align-items:center; gap:6px; font-size:13px;">
+                                    <input type="checkbox" id="showLabels" checked>
+                                    Labels anzeigen
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="inline-actions" style="margin-top:12px;">
+                            <button class="action" onclick="runInference()" id="runBtn">Testen</button>
+                            <button onclick="resetTest()">Zurücksetzen</button>
+                        </div>
+
+                        <div class="progress-wrap" id="progressWrap" style="display:none;">
+                            <div class="progress-label">
+                                <span id="progressText">0%</span>
+                                <span class="muted" id="progressEta">--s</span>
+                            </div>
+                            <div class="progress-bar">
+                                <div id="progressInner"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="preview-panel">
+                        <div class="preview-header">
+                            <span class="chip">Preview</span>
+                            <div class="preview-meta">
+                                <span class="muted" id="previewName">Keine Datei</span>
+                                <a id="resultLink" class="muted" href="#" target="_blank" style="display:none;">Öffnen</a>
+                            </div>
+                        </div>
+                        <div class="preview-box" id="previewBox">
+                            <span class="muted">Vorschau erscheint hier</span>
+                        </div>
+                        <h4 style="margin:12px 0 6px;">Antwort</h4>
+                        <pre id="output"></pre>
+
+                        <h4 style="margin:12px 0 6px;">Feedback Terminal</h4>
+                        <div class="log-panel" id="logPanel">
+                            <div id="logEntries" class="log-entries"></div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="settings" class="card tab-section">
+                <h3>Einstellungen</h3>
+                <p class="subtitle">Platzhalter für zukünftige Optionen (z.B. Standardmodell, Thresholds).</p>
+                <p style="color: var(--muted); margin: 0;">Dieser Bereich ist vorbereitet, um später Konfigurationen hinzuzufügen.</p>
+            </section>
+        </main>
+    </div>
+
+    <div id="toastStack" class="toast-stack"></div>
+</body>
+</html>
