@@ -3,7 +3,11 @@ import gc
 import time
 import shutil
 import json
+import io
+import base64
 from pathlib import Path
+from datetime import datetime
+from collections import deque
 import torch
 import cv2
 import mimetypes
@@ -14,6 +18,7 @@ app = Flask(__name__)
 app.config['MODEL_DIR'] = 'models'
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['UPLOAD_FOLDER_ABS'] = os.path.abspath(app.config['UPLOAD_FOLDER'])
+app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB max upload
 MAX_VIDEO_MB = 150
 MAX_VIDEO_DURATION_S = 60
 torch.set_grad_enabled(False)  # Globale Inferenz ohne Gradienten
@@ -23,6 +28,9 @@ active_model = {
     "name": None,
     "instance": None
 }
+
+# Results History für Verlauf und Vergleich
+results_history = deque(maxlen=100)
 
 # Verzeichnisse sicherstellen
 os.makedirs(app.config['MODEL_DIR'], exist_ok=True)
@@ -119,12 +127,126 @@ def extract_results_data(results):
             }
         
         all_detections.append(detection)
-    
+
     return all_detections, last_save_dir
+
+def save_to_history(result_data, model_name, source_type, source_value, processing_time):
+    """Speichert ein Ergebnis in der History."""
+    history_entry = {
+        "id": datetime.now().strftime("%Y%m%d%H%M%S%f"),
+        "timestamp": time.time(),
+        "datetime": datetime.now().isoformat(),
+        "model": model_name,
+        "source_type": source_type,
+        "source_value": source_value,
+        "processing_time": processing_time,
+        "detections_count": len(result_data.get("detections", [])),
+        "detections": result_data.get("detections", []),
+        "image_url": result_data.get("image_url"),
+        "video_url": result_data.get("video_url")
+    }
+    results_history.append(history_entry)
+    return history_entry
 
 @app.route('/')
 def index():
     return render_template('index.html')
+
+@app.route('/history', methods=['GET'])
+def get_history():
+    """Gibt die Results-History zurück."""
+    limit = request.args.get('limit', 50, type=int)
+    source_type = request.args.get('source_type')
+    
+    history_list = list(results_history)
+    
+    # Filter nach source_type
+    if source_type:
+        history_list = [h for h in history_list if h['source_type'] == source_type]
+    
+    # Nach Timestamp sortieren (neueste zuerst)
+    history_list.sort(key=lambda x: x['timestamp'], reverse=True)
+    
+    # Limit anwenden
+    history_list = history_list[:limit]
+    
+    return jsonify({
+        "count": len(history_list),
+        "total_available": len(results_history),
+        "history": history_list
+    })
+
+@app.route('/history/clear', methods=['POST'])
+def clear_history():
+    """Löscht die gesamte History."""
+    results_history.clear()
+    return jsonify({"status": "History gelöscht", "count": 0})
+
+@app.route('/history/<entry_id>', methods=['GET'])
+def get_history_entry(entry_id):
+    """Gibt einen spezifischen History-Eintrag zurück."""
+    for entry in results_history:
+        if entry['id'] == entry_id:
+            return jsonify(entry)
+    return jsonify({"error": "Eintrag nicht gefunden"}), 404
+
+@app.route('/exports/results/<export_format>', methods=['GET'])
+def export_results(export_format):
+    """Exportiert Ergebnisse in verschiedenen Formaten."""
+    limit = request.args.get('limit', 100, type=int)
+    history_list = list(results_history)[:limit]
+    
+    if export_format == 'json':
+        return jsonify({
+            "exported_at": datetime.now().isoformat(),
+            "count": len(history_list),
+            "results": history_list
+        })
+    
+    elif export_format == 'csv':
+        import csv
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(['ID', 'Timestamp', 'Model', 'Source Type', 'Detections', 'Processing Time'])
+        
+        for entry in history_list:
+            writer.writerow([
+                entry['id'],
+                entry['datetime'],
+                entry['model'],
+                entry['source_type'],
+                entry['detections_count'],
+                f"{entry['processing_time']:.2f}s"
+            ])
+        
+        output.seek(0)
+        return Response(
+            output.getvalue(),
+            mimetype='text/csv',
+            headers={'Content-Disposition': 'attachment; filename=results.csv'}
+        )
+    
+    elif export_format == 'summary':
+        # Zusammenfassung der Statistik
+        total_detections = sum(e['detections_count'] for e in history_list)
+        avg_time = sum(e['processing_time'] for e in history_list) / len(history_list) if history_list else 0
+        
+        # Detections nach Klasse gruppieren
+        class_counts = {}
+        for entry in history_list:
+            for det in entry['detections']:
+                cls = det.get('class', 'unknown')
+                class_counts[cls] = class_counts.get(cls, 0) + 1
+        
+        return jsonify({
+            "total_inferences": len(history_list),
+            "total_detections": total_detections,
+            "avg_processing_time": f"{avg_time:.2f}s",
+            "detections_by_class": class_counts,
+            "top_classes": sorted(class_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+        })
+    
+    return jsonify({"error": "Ungültiges Format. Unterstützt: json, csv, summary"}), 400
 
 @app.route('/uploads/<path:filename>')
 def serve_upload(filename):
@@ -142,8 +264,52 @@ def list_models():
     """Listet verfügbare Dateien und zeigt das aktuell aktive Modell an."""
     files = [f for f in os.listdir(app.config['MODEL_DIR']) if f.endswith('.pt')]
     return jsonify({
-        "available_models": files, 
+        "available_models": files,
         "active_model": active_model["name"]
+    })
+
+@app.route('/models/suggest', methods=['GET'])
+def suggest_model():
+    """Schlägt ein Modell basierend auf dem Einsatzzweck vor."""
+    task = request.args.get('task', 'detect')  # detect, pose, seg, cls
+    files = [f for f in os.listdir(app.config['MODEL_DIR']) if f.endswith('.pt')]
+    
+    # Filter models by task
+    task_models = []
+    for f in files:
+        f_lower = f.lower()
+        if task == 'pose' and 'pose' in f_lower:
+            task_models.append(f)
+        elif task == 'seg' and 'seg' in f_lower:
+            task_models.append(f)
+        elif task == 'cls' and 'cls' in f_lower:
+            task_models.append(f)
+        elif task == 'detect' and 'pose' not in f_lower and 'seg' not in f_lower and 'cls' not in f_lower:
+            task_models.append(f)
+    
+    # Sort by size preference (n < s < m < l < x)
+    size_order = {'n': 0, 's': 1, 'm': 2, 'l': 3, 'x': 4}
+    def get_size_priority(name):
+        name_lower = name.lower()
+        for size, priority in size_order.items():
+            if f'-{size}' in name_lower or f'{size}.' in name_lower:
+                return priority
+        return 5  # Unknown size
+    
+    task_models.sort(key=get_size_priority)
+    
+    # Suggest best match
+    suggestion = task_models[0] if task_models else None
+    
+    return jsonify({
+        "task": task,
+        "available": task_models,
+        "suggested": suggestion,
+        "recommendation": {
+            "fast": [m for m in task_models if '-n.' in m.lower() or '-s.' in m.lower()][:1],
+            "balanced": [m for m in task_models if '-m.' in m.lower()][:1],
+            "accurate": [m for m in task_models if '-l.' in m.lower() or '-x.' in m.lower()][:1]
+        } if task_models else {}
     })
 
 @app.route('/load/<model_name>', methods=['POST'])
@@ -289,8 +455,17 @@ def test_model():
             if annotated_video:
                 response_payload["video_url"] = f"/uploads/{annotated_video.name}"
 
+        # In History speichern
+        save_to_history(
+            response_payload, 
+            active_model["name"], 
+            source_type, 
+            str(inference_source),
+            all_detections[0].get("speed", {}).get("inference", 0) if all_detections else 0
+        )
+
         return jsonify(response_payload)
-        
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     finally:
@@ -546,7 +721,7 @@ def pick_annotated_video(save_dir: Path, original_path: str, upload_root: Path) 
     # Ultralytics speichert annotierte Videos im save_dir mit dem Originalnamen
     # Das annotierte Video liegt direkt im save_dir
     annotated_candidates = []
-    
+
     # 1. Suche im save_dir nach MP4-Dateien
     if save_dir.exists():
         for f in save_dir.glob("*.mp4"):
@@ -558,14 +733,14 @@ def pick_annotated_video(save_dir: Path, original_path: str, upload_root: Path) 
         for f in save_dir.glob("*.mov"):
             if f.resolve() != orig:
                 annotated_candidates.append(f.resolve())
-    
+
     # 2. Suche in runs/ Verzeichnissen
     runs_dir = Path.home() / "runs"
     if runs_dir.exists():
         for f in runs_dir.rglob("*.mp4"):
             if f.resolve() != orig:
                 annotated_candidates.append(f.resolve())
-    
+
     # 3. Suche im upload_root
     if upload_root.exists():
         for f in upload_root.glob("*.mp4"):
@@ -586,8 +761,18 @@ def pick_annotated_video(save_dir: Path, original_path: str, upload_root: Path) 
 
     candidate = sorted(annotated_candidates, key=score, reverse=True)[0]
 
+    # Sauberen Dateinamen generieren (ohne ungültige Zeichen)
+    # YouTube-URLs enthalten 'watch?v=' was ungültig ist
+    import re
+    orig_name = orig.name if orig.name else "video"
+    # Entferne ungültige Zeichen für Dateinamen
+    safe_name = re.sub(r'[<>:"/\\|?*]', '_', orig_name)
+    # Kürze lange Namen
+    if len(safe_name) > 50:
+        safe_name = safe_name[:50]
+    
     # Immer nach uploads kopieren, um eine saubere URL zu haben
-    dest = upload_root / f"annotated_{orig.stem}_{int(time.time())}{candidate.suffix}"
+    dest = upload_root / f"annotated_{safe_name}_{int(time.time())}{candidate.suffix}"
     try:
         shutil.copy2(candidate, dest)
     except Exception as e:
@@ -596,12 +781,12 @@ def pick_annotated_video(save_dir: Path, original_path: str, upload_root: Path) 
 
     # Falls nicht MP4 oder MP4 mit inkompatiblem Codec, nach H.264 (yuv420p) konvertieren
     if dest.suffix.lower() != ".mp4":
-        mp4_dest = upload_root / f"annotated_{orig.stem}_{int(time.time())}.mp4"
+        mp4_dest = upload_root / f"annotated_{safe_name}_{int(time.time())}.mp4"
         if convert_to_mp4(dest, mp4_dest):
             dest = mp4_dest
     else:
         # dennoch transkodieren, um Browserkompatibilität sicherzustellen
-        mp4_dest = upload_root / f"annotated_{orig.stem}_{int(time.time())}.mp4"
+        mp4_dest = upload_root / f"annotated_{safe_name}_{int(time.time())}.mp4"
         if convert_to_mp4(dest, mp4_dest):
             dest = mp4_dest
 
@@ -885,7 +1070,7 @@ def test_batch():
                 "imgsz": imgsz,
             },
         })
-        
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     finally:
@@ -896,6 +1081,154 @@ def test_batch():
                     os.remove(img_path)
                 except Exception:
                     pass
+
+@app.route('/health', methods=['GET'])
+def health_check():
+    """Health check endpoint für Monitoring."""
+    gpu_available = torch.cuda.is_available()
+    gpu_name = torch.cuda.get_device_name(0) if gpu_available else None
+    gpu_memory = None
+    if gpu_available:
+        gpu_memory = {
+            "total": round(torch.cuda.get_device_properties(0).total_memory / 1024**3, 2),
+            "allocated": round(torch.cuda.memory_allocated(0) / 1024**3, 2),
+            "reserved": round(torch.cuda.memory_reserved(0) / 1024**3, 2)
+        }
+    
+    return jsonify({
+        "status": "healthy",
+        "model_loaded": active_model["name"],
+        "gpu": {
+            "available": gpu_available,
+            "name": gpu_name,
+            "memory": gpu_memory
+        } if gpu_available else {"available": False},
+        "cpu_count": os.cpu_count(),
+        "torch_version": torch.__version__,
+        "timestamp": time.time()
+    })
+
+@app.route('/compare', methods=['POST'])
+def compare_models():
+    """Vergleicht mehrere Modelle mit demselben Bild."""
+    if 'image' not in request.files:
+        return jsonify({"error": "Kein Bild hochgeladen"}), 400
+    
+    models = request.form.getlist('models')
+    if not models:
+        return jsonify({"error": "Keine Modelle angegeben"}), 400
+    
+    conf = float(request.form.get('conf', 0.25))
+    iou = float(request.form.get('iou', 0.45))
+    imgsz = int(request.form.get('imgsz', 640))
+    
+    # Bild speichern
+    file = request.files['image']
+    img_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
+    file.save(img_path)
+    
+    results = []
+    start_time = time.time()
+    
+    try:
+        for model_name in models:
+            model_path = os.path.join(app.config['MODEL_DIR'], model_name)
+            if not os.path.exists(model_path):
+                results.append({
+                    "model": model_name,
+                    "error": "Modell nicht gefunden"
+                })
+                continue
+            
+            try:
+                # Modell laden
+                model = YOLO(model_path)
+                
+                # Inferenz
+                with torch.inference_mode():
+                    res = model(img_path, conf=conf, iou=iou, imgsz=imgsz, verbose=False)
+                
+                # Ergebnisse extrahieren
+                detections = []
+                if res[0].boxes is not None and res[0].boxes.xyxy is not None:
+                    for i, box in enumerate(res[0].boxes):
+                        cls_id = int(box.cls[0]) if box.cls is not None and len(box.cls) > 0 else -1
+                        conf_val = float(box.conf[0]) if box.conf is not None and len(box.conf) > 0 else 0
+                        bbox = [round(x, 2) for x in box.xyxy[0].tolist()]
+                        class_name = res[0].names.get(cls_id, "unknown")
+                        detections.append({
+                            "class": class_name,
+                            "class_id": cls_id,
+                            "confidence": conf_val,
+                            "bbox": bbox
+                        })
+                
+                results.append({
+                    "model": model_name,
+                    "detections": detections,
+                    "detections_count": len(detections),
+                    "inference_time": res[0].speed.get('inference', 0) if res else 0,
+                    "success": True
+                })
+                
+                # Modell aus Speicher entfernen
+                del model
+                
+            except Exception as e:
+                results.append({
+                    "model": model_name,
+                    "error": str(e),
+                    "success": False
+                })
+        
+        total_time = time.time() - start_time
+        
+        # Vergleichs-Statistik
+        comparison = {
+            "total_time": round(total_time, 2),
+            "models_compared": len(results),
+            "results": results,
+            "fastest_model": min((r for r in results if r.get('success')), key=lambda x: x.get('inference_time', float('inf')), default=None),
+            "most_detections": max((r for r in results if r.get('success')), key=lambda x: x.get('detections_count', 0), default=None)
+        }
+        
+        return jsonify(comparison)
+    
+    finally:
+        # Aufräumen
+        if os.path.exists(img_path):
+            try:
+                os.remove(img_path)
+            except Exception:
+                pass
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+@app.route('/system/info', methods=['GET'])
+def system_info():
+    """Systeminformationen für Debugging."""
+    import platform
+
+    info = {
+        "platform": platform.system(),
+        "platform_version": platform.version(),
+        "python_version": platform.python_version(),
+        "torch_version": torch.__version__,
+        "torch_cuda": torch.version.cuda if hasattr(torch.version, 'cuda') else None,
+        "cuda_available": torch.cuda.is_available(),
+        "cuda_version": torch.version.cuda if torch.cuda.is_available() else None,
+        "cpu_count": os.cpu_count()
+    }
+    
+    # Optional: psutil für Memory-Info
+    try:
+        import psutil
+        info["memory_gb"] = round(psutil.virtual_memory().total / 1024**3, 2)
+    except ImportError:
+        info["memory_gb"] = None
+    
+    return jsonify(info)
 
 if __name__ == '__main__':
     # Threaded=True ist wichtig für SSE-Streams und parallele Requests

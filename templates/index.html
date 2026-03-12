@@ -1,53 +1,114 @@
 <!DOCTYPE html>
 <html lang="de">
 <head>
-    <title>YOLO Model Manager</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YOLO Vision - AI Model Manager</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
     <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 </head>
 <body>
     <div class="layout">
+        <!-- Sidebar -->
         <aside>
             <div class="brand">
                 <div class="brand-badge">Y</div>
-                <span>YOLO Model Manager</span>
+                <span>YOLO Vision</span>
             </div>
+            
             <nav>
-                <button class="active" data-target="hub">Model Hub</button>
-                <button data-target="testing">Model Testing</button>
-                <button data-target="settings">Einstellungen</button>
+                <button class="active" data-target="hub">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
+                    </svg>
+                    Model Hub
+                </button>
+                <button data-target="testing">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path>
+                    </svg>
+                    Testing
+                </button>
+                <button data-target="compare">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path>
+                    </svg>
+                    Vergleich
+                </button>
+                <button data-target="history">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    Verlauf
+                </button>
+                <button data-target="stats">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+                    </svg>
+                    Statistik
+                </button>
+                <button data-target="settings">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                    </svg>
+                    Einstellungen
+                </button>
             </nav>
+
+            <div style="margin-top:auto; padding-top:20px; border-top:1px solid var(--border);">
+                <div class="pill" id="activeModelPill" style="display:none; width:100%; justify-content:center;">
+                    <span class="dot"></span>
+                    <span id="activeModelLabel"></span>
+                </div>
+            </div>
         </aside>
 
+        <!-- Main Content -->
         <main>
-            <h1>YOLO Modell Verwaltung</h1>
-            <p class="subtitle">Modelle laden, testen und Einstellungen verwalten – alles an einem Ort.</p>
+            <!-- Page Header -->
+            <div class="page-header">
+                <h1>🎯 YOLO Vision</h1>
+                <p class="subtitle">Fortschrittliche KI-Modellverwaltung für Echtzeit-Objekterkennung und Pose-Estimation</p>
+            </div>
 
-            <section id="hub" class="card tab-section">
+            <!-- Model Hub Section -->
+            <section id="hub" class="card tab-section active">
                 <div class="section-header">
                     <div>
-                        <h3 style="margin:0;">Model Hub</h3>
-                        <p class="subtitle" style="margin:4px 0 0;">Verfügbare Modelle im Dateisystem verwalten.</p>
+                        <h3>📦 Model Hub</h3>
+                        <p class="subtitle" style="margin:8px 0 0;">Verfügbare YOLO-Modelle verwalten und aktivieren</p>
                     </div>
-                    <div class="pill" id="activeModelPill" style="display:none;">
-                        <span class="dot"></span>
-                        <span id="activeModelLabel"></span>
-                    </div>
+                    <button class="action" onclick="updateModelList()">
+                        <svg style="width:16px; height:16px; display:inline; vertical-align:middle;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                        </svg>
+                        Aktualisieren
+                    </button>
                 </div>
 
                 <ul id="modelList" class="model-grid"></ul>
 
-                <div class="section-header" style="margin-top: 10px;">
-                    <small style="color:var(--muted);">Klicke auf „Laden", um ein Modell zu aktivieren. Das aktive Modell wird automatisch im Test-Tab vorausgefüllt.</small>
-                    <button class="action" onclick="updateModelList()">Liste aktualisieren</button>
+                <div style="background:var(--bg-card); border-radius:12px; padding:16px; border:1px solid var(--border);">
+                    <h4 style="margin:0 0 8px; font-size:14px;">💡 Tipps</h4>
+                    <ul style="margin:0; padding-left:20px; color:var(--text-secondary); font-size:13px; line-height:1.8;">
+                        <li>Klicke auf <strong>"Laden"</strong> um ein Modell zu aktivieren</li>
+                        <li>Pose-Modelle erkennen Körperposen, Detection-Modelle erkennen Objekte</li>
+                        <li>Größere Modelle (l, x) sind genauer aber langsamer</li>
+                        <li>Kleinere Modelle (n, s) sind schneller für Echtzeit-Anwendungen</li>
+                    </ul>
                 </div>
             </section>
 
+            <!-- Testing Section -->
             <section id="testing" class="card tab-section">
                 <div class="section-header">
                     <div>
-                        <h3 style="margin:0;">Model Testing</h3>
-                        <p class="subtitle" style="margin:4px 0 0;">Bild hochladen, Modell wählen, Ergebnis ansehen.</p>
+                        <h3>🧪 Model Testing</h3>
+                        <p class="subtitle" style="margin:8px 0 0;">Bilder, Videos oder Streams analysieren</p>
                     </div>
                     <div class="pill" id="testStatusPill" style="display:none;">
                         <span class="dot"></span>
@@ -55,98 +116,126 @@
                     </div>
                 </div>
 
-                <div class="test-grid">
+                <div class="test-grid" style="display:grid; grid-template-columns:1fr 1fr; gap:24px;">
+                    <!-- Left Panel: Controls -->
                     <div class="input-stack">
-                        <label class="field-label">Modell</label>
-                        <div class="input-row">
-                            <input type="text" id="selectedModel" placeholder="Modellname (z.B. yolov8n.pt)">
-                            <button class="ghost" onclick="updateModelList()">Aktualisieren</button>
+                        <!-- Model Selection -->
+                        <div>
+                            <label class="field-label">🤖 Modell</label>
+                            <div class="input-row">
+                                <input type="text" id="selectedModel" placeholder="Modellname (z.B. yolo26l-pose.pt)" style="flex:1;">
+                                <button class="ghost" onclick="updateModelList()">↻</button>
+                            </div>
                         </div>
 
-                        <label class="field-label">Quelle</label>
-                        <div class="input-row">
-                            <button id="modeImage" class="ghost active" onclick="setMode('image')">Bild</button>
-                            <button id="modeVideo" class="ghost" onclick="setMode('video')">Video</button>
-                            <button id="modeUrl" class="ghost" onclick="setMode('url')">URL</button>
-                            <button id="modeWebcam" class="ghost" onclick="setMode('webcam')">Webcam</button>
-                            <button id="modeBatch" class="ghost" onclick="setMode('batch')">Batch</button>
+                        <!-- Source Type Tabs -->
+                        <div>
+                            <label class="field-label">📥 Quelle</label>
+                            <div class="source-tabs">
+                                <button class="source-tab active" data-mode="image">🖼️ Bild</button>
+                                <button class="source-tab" data-mode="video">🎬 Video</button>
+                                <button class="source-tab" data-mode="url">🔗 URL</button>
+                                <button class="source-tab" data-mode="webcam">📷 Webcam</button>
+                                <button class="source-tab" data-mode="batch">📁 Batch</button>
+                                <button class="source-tab" data-mode="stream">📺 Stream</button>
+                            </div>
                         </div>
 
-                        <!-- Bild Input -->
-                        <div id="imageInputGroup" style="display:block;">
-                            <label class="field-label">Bild</label>
+                        <!-- Image Input -->
+                        <div id="imageInputGroup" class="input-group">
                             <div class="dropzone" id="dropzone">
                                 <input type="file" id="imageInput" accept="image/*" hidden>
                                 <input type="file" id="videoInput" accept="video/*" hidden>
-                                <input type="file" id="batchInput" accept="image/*" multiple hidden>
-                                <p id="dropPrompt">Bild hier ablegen oder klicken zum Auswählen</p>
-                                <button class="ghost" onclick="triggerFile(event)">Datei wählen</button>
+                                <svg class="dropzone-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                                </svg>
+                                <p id="dropPrompt">Bild hier ablegen oder klicken</p>
+                                <button class="ghost">Datei wählen</button>
                             </div>
-                            <small class="muted">Unterstützt: Einzelbild (JPEG/PNG/WebP).</small>
                         </div>
 
                         <!-- URL Input -->
-                        <div id="urlInputGroup" style="display:none;">
-                            <label class="field-label">Bild-URL oder Video-URL</label>
-                            <input type="text" id="urlInput" placeholder="https://ultralytics.com/images/bus.jpg">
-                            <small class="muted">Direkter Link zu einem Bild oder Video im Internet.</small>
+                        <div id="urlInputGroup" class="input-group" style="display:none;">
+                            <label class="field-label">URL eingeben</label>
+                            <input type="text" id="urlInput" placeholder="https://ultralytics.com/images/bus.jpg oder YouTube-URL">
+                            <small style="color:var(--text-muted); display:block; margin-top:6px;">Unterstützt: Direkte Bild/Video-URLs, YouTube, RTSP-Streams</small>
                         </div>
 
                         <!-- Webcam Input -->
-                        <div id="webcamInputGroup" style="display:none;">
+                        <div id="webcamInputGroup" class="input-group" style="display:none;">
                             <label class="field-label">Webcam-ID</label>
                             <input type="number" id="webcamIdInput" value="0" min="0" max="10">
-                            <small class="muted">0 = Standard-Webcam. Stream wird für ~10 Sekunden geöffnet.</small>
+                            <small style="color:var(--text-muted); display:block; margin-top:6px;">0 = Standard-Webcam, 1 = Zweite Kamera, etc.</small>
                         </div>
 
                         <!-- Batch Input -->
-                        <div id="batchInputGroup" style="display:none;">
-                            <label class="field-label">Mehrere Bilder auswählen</label>
+                        <div id="batchInputGroup" class="input-group" style="display:none;">
                             <div class="dropzone" id="batchDropzone">
-                                <p>Mehrere Bilder hier ablegen oder klicken</p>
-                                <button class="ghost" onclick="document.getElementById('batchInput').click()">Dateien wählen</button>
+                                <input type="file" id="batchInput" accept="image/*" multiple hidden>
+                                <svg class="dropzone-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path>
+                                </svg>
+                                <p>Mehrere Bilder hier ablegen</p>
+                                <button class="ghost">Dateien wählen</button>
                             </div>
-                            <small class="muted">Batch-Inferenz verarbeitet mehrere Bilder auf einmal.</small>
                         </div>
 
-                        <!-- Inferenz-Parameter -->
-                        <div style="margin-top:16px; padding:12px; background:#f8fafc; border-radius:10px; border:1px solid var(--border);">
-                            <label class="field-label" style="font-size:14px;">Inferenz-Parameter</label>
-                            <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-top:8px;">
-                                <div>
-                                    <label style="font-size:12px; color:var(--muted);">Confidence</label>
-                                    <input type="number" id="confThreshold" value="0.25" min="0" max="1" step="0.05" style="width:100%; padding:6px; border-radius:6px; border:1px solid var(--border);">
+                        <!-- Stream Input -->
+                        <div id="streamInputGroup" class="input-group" style="display:none;">
+                            <label class="field-label">Stream URL</label>
+                            <input type="text" id="streamUrlInput" placeholder="rtsp://... oder https://youtu.be/...">
+                            <small style="color:var(--text-muted); display:block; margin-top:6px;">Unterstützt: RTSP, RTMP, YouTube Live</small>
+                        </div>
+
+                        <!-- Parameters Panel -->
+                        <div class="params-panel">
+                            <label class="field-label" style="font-size:13px;">⚙️ Inferenz-Parameter</label>
+                            
+                            <div class="params-grid" style="margin-top:12px;">
+                                <div class="param-item">
+                                    <label>Confidence: <span id="confValue">0.25</span></label>
+                                    <input type="range" id="confThreshold" min="0" max="1" step="0.05" value="0.25"
+                                           oninput="document.getElementById('confValue').textContent=this.value">
                                 </div>
-                                <div>
-                                    <label style="font-size:12px; color:var(--muted);">IoU</label>
-                                    <input type="number" id="iouThreshold" value="0.45" min="0" max="1" step="0.05" style="width:100%; padding:6px; border-radius:6px; border:1px solid var(--border);">
+                                <div class="param-item">
+                                    <label>IoU: <span id="iouValue">0.45</span></label>
+                                    <input type="range" id="iouThreshold" min="0" max="1" step="0.05" value="0.45"
+                                           oninput="document.getElementById('iouValue').textContent=this.value">
                                 </div>
-                                <div>
-                                    <label style="font-size:12px; color:var(--muted);">Image Size</label>
-                                    <input type="number" id="imgSize" value="640" min="320" max="1280" step="32" style="width:100%; padding:6px; border-radius:6px; border:1px solid var(--border);">
+                                <div class="param-item">
+                                    <label>Image Size: <span id="sizeValue">640</span></label>
+                                    <input type="range" id="imgSize" min="320" max="1280" step="32" value="640"
+                                           oninput="document.getElementById('sizeValue').textContent=this.value">
                                 </div>
                             </div>
-                            <div style="display:flex; gap:12px; margin-top:8px;">
-                                <label style="display:flex; align-items:center; gap:6px; font-size:13px;">
+
+                            <div class="checkbox-group">
+                                <label class="checkbox-item">
                                     <input type="checkbox" id="saveResults" checked>
                                     Ergebnisse speichern
                                 </label>
-                                <label style="display:flex; align-items:center; gap:6px; font-size:13px;">
+                                <label class="checkbox-item">
                                     <input type="checkbox" id="showLabels" checked>
                                     Labels anzeigen
                                 </label>
                             </div>
                         </div>
 
-                        <div class="inline-actions" style="margin-top:12px;">
-                            <button class="action" onclick="runInference()" id="runBtn">Testen</button>
-                            <button onclick="resetTest()">Zurücksetzen</button>
+                        <!-- Action Buttons -->
+                        <div style="display:flex; gap:12px; margin-top:8px;">
+                            <button class="action" onclick="runInference()" id="runBtn" style="flex:1; padding:16px;">
+                                ▶️ Starten
+                            </button>
+                            <button onclick="resetTest()" class="ghost" style="padding:16px;">
+                                ↺ Zurücksetzen
+                            </button>
                         </div>
 
+                        <!-- Progress Bar -->
                         <div class="progress-wrap" id="progressWrap" style="display:none;">
                             <div class="progress-label">
                                 <span id="progressText">0%</span>
-                                <span class="muted" id="progressEta">--s</span>
+                                <span id="progressEta" class="muted">—</span>
                             </div>
                             <div class="progress-bar">
                                 <div id="progressInner"></div>
@@ -154,36 +243,240 @@
                         </div>
                     </div>
 
+                    <!-- Right Panel: Preview & Results -->
                     <div class="preview-panel">
                         <div class="preview-header">
-                            <span class="chip">Preview</span>
+                            <span class="chip">👁️ Preview</span>
                             <div class="preview-meta">
                                 <span class="muted" id="previewName">Keine Datei</span>
                                 <a id="resultLink" class="muted" href="#" target="_blank" style="display:none;">Öffnen</a>
                             </div>
                         </div>
+                        
                         <div class="preview-box" id="previewBox">
-                            <span class="muted">Vorschau erscheint hier</span>
+                            <div style="text-align:center; color:var(--text-muted);">
+                                <svg class="dropzone-icon" style="margin:0 auto 12px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                                </svg>
+                                <div>Vorschau erscheint hier</div>
+                            </div>
                         </div>
-                        <h4 style="margin:12px 0 6px;">Antwort</h4>
-                        <pre id="output"></pre>
 
-                        <h4 style="margin:12px 0 6px;">Feedback Terminal</h4>
-                        <div class="log-panel" id="logPanel">
-                            <div id="logEntries" class="log-entries"></div>
+                        <!-- Detection Results -->
+                        <div id="detectionResults" class="detection-results"></div>
+
+                        <!-- Terminal Log -->
+                        <div>
+                            <label class="field-label" style="font-size:13px;">📋 Terminal</label>
+                            <div class="log-panel">
+                                <div id="logEntries" class="log-entries"></div>
+                            </div>
+                        </div>
+
+                        <!-- JSON Output -->
+                        <div>
+                            <label class="field-label" style="font-size:13px;">📄 JSON Output</label>
+                            <div class="output-panel">
+                                <pre id="output">{}</pre>
+                            </div>
                         </div>
                     </div>
                 </div>
             </section>
 
+            <!-- Compare Section -->
+            <section id="compare" class="card tab-section">
+                <div class="section-header">
+                    <div>
+                        <h3>⚖️ Modell-Vergleich</h3>
+                        <p class="subtitle" style="margin:8px 0 0;">Vergleiche mehrere Modelle mit demselben Bild</p>
+                    </div>
+                </div>
+
+                <div style="display:grid; gap:20px;">
+                    <div class="params-panel">
+                        <h4 style="margin:0 0 16px; font-size:15px;">Einstellungen</h4>
+                        
+                        <div style="display:grid; gap:16px;">
+                            <div>
+                                <label class="field-label">Bild auswählen</label>
+                                <div class="dropzone" id="compareDropzone" style="padding:20px;">
+                                    <input type="file" id="compareImage" accept="image/*" hidden>
+                                    <svg class="dropzone-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                                    </svg>
+                                    <p id="compareDropPrompt">Bild hier ablegen oder klicken</p>
+                                </div>
+                            </div>
+
+                            <div>
+                                <label class="field-label">Modelle auswählen</label>
+                                <div id="compareModelList" class="model-grid" style="grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); margin:0;"></div>
+                                <small style="color:var(--text-muted);">Wähle mindestens 2 Modelle für den Vergleich</small>
+                            </div>
+
+                            <div class="params-grid">
+                                <div class="param-item">
+                                    <label>Confidence: <span id="compareConfValue">0.25</span></label>
+                                    <input type="range" id="compareConf" min="0" max="1" step="0.05" value="0.25"
+                                           oninput="document.getElementById('compareConfValue').textContent=this.value">
+                                </div>
+                                <div class="param-item">
+                                    <label>IoU: <span id="compareIouValue">0.45</span></label>
+                                    <input type="range" id="compareIou" min="0" max="1" step="0.05" value="0.45"
+                                           oninput="document.getElementById('compareIouValue').textContent=this.value">
+                                </div>
+                                <div class="param-item">
+                                    <label>Image Size: <span id="compareSizeValue">640</span></label>
+                                    <input type="range" id="compareSize" min="320" max="1280" step="32" value="640"
+                                           oninput="document.getElementById('compareSizeValue').textContent=this.value">
+                                </div>
+                            </div>
+
+                            <button class="action" onclick="runCompare()" id="compareBtn" style="padding:16px;">
+                                ⚖️ Vergleich starten
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="compareResults" style="display:none;">
+                        <h4 style="margin:0 0 16px; font-size:16px;">📊 Ergebnisse</h4>
+                        <div id="compareResultsContent"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- History Section -->
+            <section id="history" class="card tab-section">
+                <div class="section-header">
+                    <div>
+                        <h3>📜 Verlauf</h3>
+                        <p class="subtitle" style="margin:8px 0 0;">Zuletzt durchgeführte Inferenzen</p>
+                    </div>
+                    <div style="display:flex; gap:8px;">
+                        <button class="ghost" onclick="loadHistory()">↻ Aktualisieren</button>
+                        <button class="ghost" onclick="clearHistory()">🗑️ Löschen</button>
+                        <button class="action" onclick="exportHistory('json')">📥 Export JSON</button>
+                    </div>
+                </div>
+
+                <div id="historyList" style="display:grid; gap:12px;"></div>
+
+                <div id="historyEmpty" class="empty-state" style="display:none;">
+                    <svg class="empty-state-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    <div>Noch keine Einträge im Verlauf</div>
+                    <small>Führe eine Inferenz durch, um sie hier zu sehen</small>
+                </div>
+            </section>
+
+            <!-- Statistics Section -->
+            <section id="stats" class="card tab-section">
+                <div class="section-header">
+                    <div>
+                        <h3>📊 Statistik</h3>
+                        <p class="subtitle" style="margin:8px 0 0;">Deine Inferenz-Statistiken im Überblick</p>
+                    </div>
+                    <button class="ghost" onclick="localStorage.removeItem('yolo_stats'); location.reload();">
+                        ↺ Zurücksetzen
+                    </button>
+                </div>
+
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-value" id="statsTotal">0</div>
+                        <div class="stat-label">Durchgeführte Inferenzen</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="statsDetections">0</div>
+                        <div class="stat-label">Erkannte Objekte</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="statsTime">0s</div>
+                        <div class="stat-label">Ø Verarbeitungszeit</div>
+                    </div>
+                </div>
+
+                <div style="background:var(--bg-card); border-radius:12px; padding:20px; border:1px solid var(--border); margin-top:20px;">
+                    <h4 style="margin:0 0 12px; font-size:14px;">📈 Verlauf</h4>
+                    <p style="color:var(--text-secondary); font-size:13px; margin:0;">
+                        Die Statistiken werden lokal in deinem Browser gespeichert und beim nächsten Besuch wieder geladen.
+                    </p>
+                </div>
+            </section>
+
+            <!-- Settings Section -->
             <section id="settings" class="card tab-section">
-                <h3>Einstellungen</h3>
-                <p class="subtitle">Platzhalter für zukünftige Optionen (z.B. Standardmodell, Thresholds).</p>
-                <p style="color: var(--muted); margin: 0;">Dieser Bereich ist vorbereitet, um später Konfigurationen hinzuzufügen.</p>
+                <div class="section-header">
+                    <div>
+                        <h3>⚙️ Einstellungen</h3>
+                        <p class="subtitle" style="margin:8px 0 0;">Anwendungskonfiguration anpassen</p>
+                    </div>
+                </div>
+
+                <div style="display:grid; gap:16px; max-width:600px;">
+                    <div class="params-panel">
+                        <h4 style="margin:0 0 16px; font-size:15px;">Allgemein</h4>
+                        
+                        <div style="display:grid; gap:12px;">
+                            <div>
+                                <label class="field-label" style="font-size:13px;">Standard Modell</label>
+                                <select id="defaultModel" style="width:100%; padding:12px; background:var(--bg-secondary); border:1px solid var(--border); border-radius:10px; color:var(--text-primary);">
+                                    <option value="">Automatisch erkennen</option>
+                                </select>
+                            </div>
+                            
+                            <div>
+                                <label class="field-label" style="font-size:13px;">Upload-Verzeichnis</label>
+                                <input type="text" value="uploads" readonly style="background:var(--bg-secondary); border:1px solid var(--border); border-radius:10px; padding:12px; color:var(--text-secondary);">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="params-panel">
+                        <h4 style="margin:0 0 16px; font-size:15px;">Tastenkürzel</h4>
+                        
+                        <div style="display:grid; gap:10px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center; padding:10px; background:var(--bg-secondary); border-radius:8px;">
+                                <span style="font-size:13px;">Inferenz starten</span>
+                                <kbd style="padding:6px 12px; background:var(--bg-card); border:1px solid var(--border); border-radius:6px; font-family:monospace; font-size:12px;">Ctrl + Enter</kbd>
+                            </div>
+                            <div style="display:flex; justify-content:space-between; align-items:center; padding:10px; background:var(--bg-secondary); border-radius:8px;">
+                                <span style="font-size:13px;">Zurücksetzen</span>
+                                <kbd style="padding:6px 12px; background:var(--bg-card); border:1px solid var(--border); border-radius:6px; font-family:monospace; font-size:12px;">Esc</kbd>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="params-panel">
+                        <h4 style="margin:0 0 16px; font-size:15px;">Über</h4>
+                        
+                        <div style="color:var(--text-secondary); font-size:13px; line-height:1.8;">
+                            <p style="margin:0 0 8px;"><strong>YOLO Vision</strong> - AI Model Manager</p>
+                            <p style="margin:0 0 8px;">Version: 2.0.0</p>
+                            <p style="margin:0;">
+                                Basierend auf Ultralytics YOLO26 für fortschrittliche Objekterkennung, 
+                                Pose-Estimation und Bildklassifizierung.
+                            </p>
+                        </div>
+                    </div>
+                </div>
             </section>
         </main>
     </div>
 
+    <!-- Toast Notifications -->
     <div id="toastStack" class="toast-stack"></div>
+
+    <!-- Keyboard Shortcuts Info -->
+    <script>
+        // Initialize default values display
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('confValue').textContent = document.getElementById('confThreshold').value;
+            document.getElementById('iouValue').textContent = document.getElementById('iouThreshold').value;
+            document.getElementById('sizeValue').textContent = document.getElementById('imgSize').value;
+        });
+    </script>
 </body>
 </html>
