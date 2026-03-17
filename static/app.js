@@ -55,6 +55,8 @@ document.addEventListener('DOMContentLoaded', () => {
     updateModelList();
     loadStats();
     setupParamLabels();
+    setupDatasetTab();
+    setupFewShotDetection();
 });
 
 function setupNav() {
@@ -927,6 +929,328 @@ function exportHistory(format) {
     showToast('Export gestartet', 'success');
 }
 
+// ==================== DATASET / GROUNDING DINO ====================
+let datasetImages = [];
+let datasetAnnotations = [];
+let datasetTemplates = [];
+
+// Dataset Tab Initialisierung
+function setupDatasetTab() {
+    setupDatasetDropzone();
+    setupDatasetParamLabels();
+}
+
+function setupDatasetDropzone() {
+    const dz = $('datasetDropzone');
+    const input = $('datasetImage');
+    if (!dz || !input) return;
+
+    dz.addEventListener('click', e => { e.preventDefault(); input.click(); });
+
+    ['dragenter', 'dragover'].forEach(evt => {
+        dz.addEventListener(evt, e => { e.preventDefault(); e.stopPropagation(); dz.classList.add('dragover'); });
+    });
+    ['dragleave', 'drop'].forEach(evt => {
+        dz.addEventListener(evt, e => { e.preventDefault(); e.stopPropagation(); dz.classList.remove('dragover'); });
+    });
+
+    dz.addEventListener('drop', e => {
+        e.preventDefault();
+        const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+        handleDatasetFiles(files);
+    });
+
+    input.addEventListener('change', e => {
+        const files = Array.from(e.target.files);
+        handleDatasetFiles(files);
+    });
+}
+
+function handleDatasetFiles(files) {
+    if (!files.length) return;
+    datasetImages = files;
+    $('datasetDropPrompt').textContent = `${files.length} Bild(er) ausgewählt`;
+    log(`${files.length} Bilder für Dataset`, 'info');
+}
+
+function setupDatasetParamLabels() {
+    const boxThresh = $('boxThreshold');
+    const textThresh = $('textThreshold');
+    if (boxThresh) $('boxThresholdValue').textContent = boxThresh.value;
+    if (textThresh) $('textThresholdValue').textContent = textThresh.value;
+
+    boxThresh?.addEventListener('input', () => {
+        $('boxThresholdValue').textContent = boxThresh.value;
+    });
+    textThresh?.addEventListener('input', () => {
+        $('textThresholdValue').textContent = textThresh.value;
+    });
+}
+
+async function loadTemplates() {
+    try {
+        const res = await fetch('/dataset/templates');
+        const data = await res.json();
+        datasetTemplates = data.templates || [];
+
+        const prompt = $('datasetPrompt');
+        if (prompt && datasetTemplates.length) {
+            const templateText = datasetTemplates.map(t => `${t.name}: "${t.prompt}"`).join('\n');
+            showToast(`${datasetTemplates.length} Vorlagen geladen`, 'success');
+            log(`Vorlagen: ${templateText}`, 'info');
+        }
+    } catch (err) {
+        showToast('Fehler: ' + err.message, 'error');
+    }
+}
+
+function applyTemplate(templateId) {
+    const template = datasetTemplates.find(t => t.id === templateId);
+    if (template) {
+        $('datasetPrompt').value = template.prompt;
+        showToast(`Vorlage "${template.name}" angewendet`, 'success');
+    }
+}
+
+async function annotateImages() {
+    const prompt = $('datasetPrompt')?.value?.trim();
+    if (!prompt) { showToast('Bitte Text-Prompt eingeben', 'error'); return; }
+    if (!datasetImages.length) { showToast('Bitte Bilder auswählen', 'error'); return; }
+
+    const btn = $('annotateBtn');
+    btn.disabled = true;
+    btn.textContent = '⏳ Verarbeite...';
+
+    const boxThreshold = $('boxThreshold')?.value || 0.35;
+    const textThreshold = $('textThreshold')?.value || 0.25;
+
+    setDatasetStatus('Verarbeite...', true);
+    startDatasetProgress();
+
+    try {
+        const formData = new FormData();
+        formData.append('prompt', prompt);
+        formData.append('box_threshold', boxThreshold);
+        formData.append('text_threshold', textThreshold);
+
+        datasetImages.forEach((file, i) => {
+            formData.append('images', file);
+        });
+
+        const res = await fetch('/dataset/annotate_batch', { method: 'POST', body: formData });
+        const data = await res.json();
+
+        if (!res.ok) throw new Error(data.error || 'Annotation fehlgeschlagen');
+
+        stopDatasetProgress(true);
+        setDatasetStatus('Fertig', false);
+        displayDatasetResults(data);
+
+        log(`${data.processed_count} Bilder annotiert`, 'success');
+        showToast(`${data.processed_count} Bilder annotiert`, 'success');
+    } catch (err) {
+        stopDatasetProgress(false);
+        setDatasetStatus('Fehler', false);
+        log(`Fehler: ${err.message}`, 'error');
+        showToast(err.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '🚀 Annotation starten';
+    }
+}
+
+function displayDatasetResults(data) {
+    datasetAnnotations = data.results || [];
+    const content = $('datasetResultsContent');
+    const preview = $('datasetPreview');
+    const previewContent = $('datasetPreviewContent');
+
+    if (!content) return;
+
+    // Ergebnisse anzeigen
+    let html = `<div class="stats-grid" style="margin-bottom:16px;">`;
+    html += `<div class="stat-card"><div class="stat-value">${data.processed_count}</div><div class="stat-label">Bilder</div></div>`;
+    const totalAnnotations = data.results?.reduce((sum, r) => sum + (r.annotation_count || 0), 0) || 0;
+    html += `<div class="stat-card"><div class="stat-value">${totalAnnotations}</div><div class="stat-label">Annotationen</div></div>`;
+    html += `</div>`;
+
+    // Annotationen pro Bild
+    if (data.results?.length) {
+        html += `<div style="display:grid; gap:12px;">`;
+        data.results.forEach((r, i) => {
+            html += `<div class="model-card">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <div>
+                        <div style="font-weight:600;">${r.filename}</div>
+                        <div style="font-size:12px; color:var(--text-secondary);">${r.annotation_count} Objekte erkannt</div>
+                    </div>
+                    <button class="ghost" onclick="showAnnotationDetails(${i})">📋 Details</button>
+                </div>
+                ${r.annotations?.length ? `<div style="margin-top:8px; display:flex; flex-wrap:wrap; gap:4px;">
+                    ${r.annotations.map(a => `<span class="chip">${a.class} (${(a.confidence * 100).toFixed(0)}%)</span>`).join('')}
+                </div>` : ''}
+            </div>`;
+        });
+        html += `</div>`;
+    }
+
+    content.innerHTML = html;
+    $('datasetResults').style.display = 'block';
+
+    // Preview der annotierten Bilder
+    if (data.annotated_images?.length && previewContent) {
+        previewContent.innerHTML = data.annotated_images.map(url => 
+            `<div class="preview-item"><img src="${url}" alt="annotated" style="width:100%; border-radius:8px;"></div>`
+        ).join('');
+        preview.style.display = 'block';
+    }
+}
+
+function showAnnotationDetails(index) {
+    const result = datasetAnnotations[index];
+    if (!result) return;
+
+    const details = JSON.stringify(result, null, 2);
+    log(`Details: ${result.filename} - ${result.annotation_count} Annotationen`, 'info');
+    
+    // JSON Export für dieses Bild
+    const blob = new Blob([details], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${result.filename.replace(/\.[^.]+$/, '')}_annotations.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+function exportDataset(format) {
+    if (!datasetAnnotations.length) { showToast('Keine Annotationen zum Exportieren', 'error'); return; }
+
+    const allAnnotations = datasetAnnotations.flatMap(r => r.annotations || []);
+    if (!allAnnotations.length) { showToast('Keine Annotationen gefunden', 'error'); return; }
+
+    const classNames = [...new Set(allAnnotations.map(a => a.class))];
+
+    if (format === 'json') {
+        const blob = new Blob([JSON.stringify({ annotations: datasetAnnotations, classes: classNames }, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `dataset_annotations_${Date.now()}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        showToast('JSON Export gestartet', 'success');
+    } else if (format === 'yolo') {
+        exportToYOLO(allAnnotations, classNames);
+    } else if (format === 'coco') {
+        exportToCOCO(allAnnotations, classNames);
+    }
+}
+
+async function exportToYOLO(annotations, classNames) {
+    try {
+        const res = await fetch('/dataset/export/yolo', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ annotations, class_names: classNames })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showToast('YOLO Export erstellt', 'success');
+            log(`YOLO Format: ${classNames.length} Klassen`, 'success');
+        }
+    } catch (err) {
+        showToast('Export Fehler: ' + err.message, 'error');
+    }
+}
+
+async function exportToCOCO(annotations, classNames) {
+    try {
+        const res = await fetch('/dataset/export/coco', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ annotations, class_names: classNames })
+        });
+        const data = await res.json();
+        if (data.success) {
+            const blob = new Blob([JSON.stringify(data.coco_format, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `coco_annotations_${Date.now()}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+            showToast('COCO Export erstellt', 'success');
+        }
+    } catch (err) {
+        showToast('Export Fehler: ' + err.message, 'error');
+    }
+}
+
+function clearDataset() {
+    datasetImages = [];
+    datasetAnnotations = [];
+    $('datasetImage').value = '';
+    $('datasetPrompt').value = '';
+    $('datasetDropPrompt').textContent = 'Bilder ablegen oder klicken';
+    $('datasetResults')?.style.setProperty('display', 'none');
+    $('datasetPreview')?.style.setProperty('display', 'none');
+    setDatasetStatus();
+    stopDatasetProgress(false);
+    log('Dataset zurückgesetzt', 'info');
+}
+
+function setDatasetStatus(text, isLoading = false) {
+    const pill = $('datasetStatusPill');
+    const label = $('datasetStatusLabel');
+    if (!pill) return;
+    if (!text) { pill.style.display = 'none'; return; }
+    pill.style.display = 'inline-flex';
+    pill.className = `pill ${isLoading ? 'loading' : 'active'}`;
+    label.textContent = text;
+}
+
+let datasetProgressTimer = null;
+let datasetProgressStart = null;
+
+function startDatasetProgress() {
+    const wrap = $('datasetProgressWrap');
+    if (!wrap) return;
+    stopDatasetProgress(false);
+    wrap.style.display = 'grid';
+    datasetProgressStart = Date.now();
+    setDatasetProgress(5, '—');
+
+    datasetProgressTimer = setInterval(() => {
+        const elapsed = (Date.now() - datasetProgressStart) / 1000;
+        const pct = Math.min(90, 5 + (elapsed / 30) * 85);
+        setDatasetProgress(Math.round(pct), `${Math.max(1, Math.round(30 - elapsed))}s`);
+    }, 700);
+}
+
+function stopDatasetProgress(success) {
+    if (datasetProgressTimer) clearInterval(datasetProgressTimer);
+    datasetProgressTimer = null;
+    const wrap = $('datasetProgressWrap');
+    if (!wrap) return;
+    if (success) {
+        setDatasetProgress(100, '0s');
+        setTimeout(() => wrap.style.display = 'none', 800);
+    } else {
+        wrap.style.display = 'none';
+    }
+    datasetProgressStart = null;
+}
+
+function setDatasetProgress(pct, eta) {
+    const inner = $('datasetProgressInner');
+    const text = $('datasetProgressText');
+    const etaEl = $('datasetProgressEta');
+    if (inner) inner.style.width = `${pct}%`;
+    if (text) text.textContent = `${pct}%`;
+    if (etaEl) etaEl.textContent = eta || '—';
+}
+
 // Global exports
 window.runInference = runInference;
 window.resetTest = resetTest;
@@ -940,3 +1264,961 @@ window.initCompare = initCompare;
 window.loadHistory = loadHistory;
 window.clearHistory = clearHistory;
 window.exportHistory = exportHistory;
+// Dataset exports
+window.loadTemplates = loadTemplates;
+window.applyTemplate = applyTemplate;
+window.annotateImages = annotateImages;
+window.exportDataset = exportDataset;
+window.clearDataset = clearDataset;
+window.showAnnotationDetails = showAnnotationDetails;
+// Model Download exports
+window.toggleModelCatalog = toggleModelCatalog;
+window.filterModels = filterModels;
+window.downloadModel = downloadModel;
+window.loadModelCatalog = loadModelCatalog;
+
+// ==================== FEW-SHOT AUTO-DETECTION ====================
+let fewShotSamples = [];
+let currentSampleAnnotations = null;
+let currentSampleImage = null;
+
+function setupFewShotDetection() {
+    setupSampleDropzone();
+    setupAutoDetectDropzone();
+    setupAutoDetectThreshold();
+    updateFewShotStatus();
+}
+
+function setupSampleDropzone() {
+    const dz = $('sampleDropzone');
+    const input = $('sampleImage');
+    if (!dz || !input) return;
+
+    dz.addEventListener('click', e => { e.preventDefault(); input.click(); });
+
+    ['dragenter', 'dragover'].forEach(evt => {
+        dz.addEventListener(evt, e => { e.preventDefault(); e.stopPropagation(); dz.classList.add('dragover'); });
+    });
+    ['dragleave', 'drop'].forEach(evt => {
+        dz.addEventListener(evt, e => { e.preventDefault(); e.stopPropagation(); dz.classList.remove('dragover'); });
+    });
+
+    dz.addEventListener('drop', e => {
+        e.preventDefault();
+        const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+        if (files.length) handleSampleFile(files[0]);
+    });
+
+    input.addEventListener('change', e => {
+        if (e.target.files.length) handleSampleFile(e.target.files[0]);
+    });
+}
+
+function handleSampleFile(file) {
+    currentSampleImage = file;
+    $('sampleDropPrompt').textContent = file.name;
+    log(`Sample: ${file.name}`, 'info');
+    
+    // Manual Annotation Editor öffnen
+    openManualAnnotationEditor(file);
+}
+
+// ==================== MANUAL ANNOTATION EDITOR - OPTIMIZED ====================
+let manualAnnotations = [];
+let isDrawing = false;
+let drawStart = { x: 0, y: 0 };
+let currentImage = null;
+let canvas = null;
+let ctx = null;
+let quickClasses = ['person', 'car', 'bicycle', 'dog', 'cat', 'object'];
+
+// Tastenkürzel initialisieren
+document.addEventListener('keydown', function(e) {
+    // Nur wenn Annotation Editor sichtbar ist
+    if ($('manualAnnotationEditor')?.style?.display === 'none') return;
+    
+    // Tastenkürzel
+    if (e.key === 'd' || e.key === 'D') {
+        e.preventDefault();
+        toggleDrawing();
+    } else if (e.key === 'z' || e.key === 'Z') {
+        if (e.ctrlKey || e.metaKey) {
+            e.preventDefault();
+            undoLastAnnotation();
+        }
+    } else if (e.key === 'Escape') {
+        e.preventDefault();
+        cancelDrawing();
+    } else if (e.key >= '1' && e.key <= '6') {
+        e.preventDefault();
+        setClass(quickClasses[parseInt(e.key) - 1]);
+    } else if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (manualAnnotations.length > 0) {
+            e.preventDefault();
+            undoLastAnnotation();
+        }
+    } else if (e.key === 's' || e.key === 'S') {
+        if (e.ctrlKey || e.metaKey) {
+            e.preventDefault();
+            saveManualAnnotations();
+        }
+    }
+});
+
+function openManualAnnotationEditor(file) {
+    const editorEl = $('manualAnnotationEditor');
+    if (!editorEl) return;
+    
+    editorEl.style.display = 'block';
+    
+    // Use AnnEditor
+    if (window.AnnEditor) {
+        window.AnnEditor.loadImage(file).then(() => {
+            window.AnnEditor.setMode('draw');
+            window.AnnEditor.setClass('object');
+        });
+    }
+}
+
+function initCanvas() {
+    canvas = $('annotationCanvas');
+    if (!canvas) return;
+    
+    ctx = canvas.getContext('2d');
+    
+    // Canvas Größe an Bild anpassen (max 600px width)
+    const maxWidth = 600;
+    const scale = Math.min(1, maxWidth / currentImage.width);
+    canvas.width = currentImage.width * scale;
+    canvas.height = currentImage.height * scale;
+    
+    // Bild zeichnen
+    redrawCanvas();
+    updateCanvasStatus('🖱️ Klicken & ziehen zum Zeichnen');
+    
+    // Event Listener für Drawing
+    canvas.addEventListener('mousedown', startBox);
+    canvas.addEventListener('mousemove', drawBox);
+    canvas.addEventListener('mouseup', endBox);
+    canvas.addEventListener('mouseleave', endBox);
+    canvas.addEventListener('mouseenter', () => canvas.classList.add('active'));
+    canvas.addEventListener('mouseleave', () => canvas.classList.remove('active'));
+    
+    // Touch Support
+    canvas.addEventListener('touchstart', handleTouchStart);
+    canvas.addEventListener('touchmove', handleTouchMove);
+    canvas.addEventListener('touchend', handleTouchEnd);
+}
+
+function updateCanvasStatus(message, isRecording = false) {
+    const overlay = $('canvasOverlay');
+    const status = $('canvasStatus');
+    if (overlay && status) {
+        overlay.style.display = 'flex';
+        overlay.classList.add('show');
+        status.textContent = message;
+        overlay.classList.toggle('recording', isRecording);
+    }
+}
+
+function toggleDrawing() {
+    if (isDrawing) {
+        cancelDrawing();
+    } else {
+        startDrawing();
+    }
+}
+
+function startDrawing() {
+    isDrawing = true;
+    const btn = $('drawBtn');
+    if (btn) {
+        btn.textContent = '⏹ Stop';
+        btn.style.background = 'var(--error)';
+    }
+    canvas?.classList.add('drawing');
+    updateCanvasStatus('✏️ Zeichne Box... (Esc zum Stop)', true);
+    
+    // Auto-fokus auf Canvas
+    canvas?.focus();
+}
+
+function cancelDrawing() {
+    isDrawing = false;
+    const btn = $('drawBtn');
+    if (btn) {
+        btn.textContent = '✏️ Zeichnen';
+        btn.style.background = '';
+    }
+    canvas?.classList.remove('drawing');
+    updateCanvasStatus('🖱️ Klicken & ziehen zum Zeichnen');
+}
+
+function setClass(className) {
+    const input = $('classNameInput');
+    if (input) {
+        input.value = className;
+        input.focus();
+    }
+    
+    // Aktuelle Klasse im Display anzeigen
+    const display = $('currentClassDisplay');
+    if (display) {
+        display.textContent = className;
+    }
+    
+    // Quick Class Buttons aktualisieren
+    document.querySelectorAll('.quick-class-btn').forEach(btn => {
+        btn.classList.remove('active');
+        if (btn.dataset?.class === className) {
+            btn.classList.add('active');
+        }
+    });
+}
+
+function redrawCanvas() {
+    if (!ctx || !currentImage) return;
+    
+    // Bild zeichnen
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(currentImage, 0, 0, canvas.width, canvas.height);
+    
+    // Annotationen zeichnen
+    manualAnnotations.forEach((ann, index) => {
+        const { x, y, width, height } = ann;
+        
+        // Box zeichnen
+        ctx.strokeStyle = '#00ff00';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x, y, width, height);
+        
+        // Label Hintergrund
+        ctx.fillStyle = 'rgba(0, 255, 0, 0.7)';
+        const labelHeight = 18;
+        ctx.fillRect(x, y - labelHeight, Math.max(80, ctx.measureText(ann.class).width + 10), labelHeight);
+        
+        // Label Text
+        ctx.fillStyle = '#000000';
+        ctx.font = '11px Inter, sans-serif';
+        ctx.fillText(ann.class, x + 4, y - 4);
+        
+        // Index zeichnen
+        ctx.fillStyle = '#00ff00';
+        ctx.fillRect(x - 2, y - 2, 16, 16);
+        ctx.fillStyle = '#000000';
+        ctx.fillText(index.toString(), x + 4, y + 9);
+    });
+}
+
+function startBox(e) {
+    if (!isDrawing) return;
+    
+    const rect = canvas.getBoundingClientRect();
+    drawStart = {
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top
+    };
+}
+
+function drawBox(e) {
+    if (!isDrawing) return;
+    
+    const rect = canvas.getBoundingClientRect();
+    const currentX = e.clientX - rect.left;
+    const currentY = e.clientY - rect.top;
+    
+    // Canvas neu zeichnen (ohne aktuelle Box)
+    redrawCanvas();
+    
+    // Aktuelle Box zeichnen (Vorschau)
+    const width = currentX - drawStart.x;
+    const height = currentY - drawStart.y;
+    
+    ctx.strokeStyle = '#00ffff';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 3]);
+    ctx.strokeRect(drawStart.x, drawStart.y, width, height);
+    ctx.setLineDash([]);
+}
+
+function endBox(e) {
+    if (!isDrawing) return;
+    
+    const rect = canvas.getBoundingClientRect();
+    const endX = e.clientX - rect.left;
+    const endY = e.clientY - rect.top;
+    
+    // Box normalisieren (negative Width/Height korrigieren)
+    let x = Math.min(drawStart.x, endX);
+    let y = Math.min(drawStart.y, endY);
+    let width = Math.abs(endX - drawStart.x);
+    let height = Math.abs(endY - drawStart.y);
+    
+    // Minimale Größe prüfen
+    if (width < 10 || height < 10) {
+        redrawCanvas();
+        return;
+    }
+    
+    // Annotation speichern
+    const className = $('classNameInput')?.value?.trim() || 'object';
+    manualAnnotations.push({
+        class: className,
+        x: x,
+        y: y,
+        width: width,
+        height: height,
+        bbox_normalized: [
+            x / canvas.width,
+            y / canvas.height,
+            (x + width) / canvas.width,
+            (y + height) / canvas.height
+        ]
+    });
+    
+    redrawCanvas();
+    updateAnnotationList();
+    $('saveAnnotationsBtn').disabled = manualAnnotations.length === 0;
+}
+
+function handleTouchStart(e) {
+    e.preventDefault();
+    const touch = e.touches[0];
+    const mouseEvent = new MouseEvent('mousedown', {
+        clientX: touch.clientX,
+        clientY: touch.clientY
+    });
+    canvas.dispatchEvent(mouseEvent);
+}
+
+function handleTouchMove(e) {
+    e.preventDefault();
+    const touch = e.touches[0];
+    const mouseEvent = new MouseEvent('mousemove', {
+        clientX: touch.clientX,
+        clientY: touch.clientY
+    });
+    canvas.dispatchEvent(mouseEvent);
+}
+
+function handleTouchEnd(e) {
+    e.preventDefault();
+    const mouseEvent = new MouseEvent('mouseup', {});
+    canvas.dispatchEvent(mouseEvent);
+}
+
+function startDrawing() {
+    isDrawing = true;
+    $('drawBtn').textContent = '⏹ Stop';
+    $('drawBtn').classList.add('active');
+    canvas.style.cursor = 'crosshair';
+}
+
+function cancelDrawing() {
+    isDrawing = false;
+    $('drawBtn').textContent = '✏️ Zeichnen';
+    $('drawBtn').classList.remove('active');
+    canvas.style.cursor = 'default';
+}
+
+function undoLastAnnotation() {
+    if (manualAnnotations.length > 0) {
+        manualAnnotations.pop();
+        redrawCanvas();
+        updateAnnotationList();
+        $('saveAnnotationsBtn').disabled = manualAnnotations.length === 0;
+    }
+}
+
+function deleteAnnotation(index) {
+    manualAnnotations.splice(index, 1);
+    redrawCanvas();
+    updateAnnotationList();
+    $('saveAnnotationsBtn').disabled = manualAnnotations.length === 0;
+}
+
+function updateAnnotationList() {
+    const list = $('annotationList');
+    if (!list) return;
+
+    if (manualAnnotations.length === 0) {
+        list.innerHTML = '<div class="annotation-help">Keine Annotationen. Zeichne Boxen mit der Maus.</div>';
+        updateAnnotationCount();
+        return;
+    }
+
+    let html = '<div class="annotation-help">' + manualAnnotations.length + ' Annotationen:</div>';
+    manualAnnotations.forEach((ann, index) => {
+        html += `
+            <div class="annotation-item">
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span class="class-badge">${ann.class}</span>
+                    <span style="color:var(--text-secondary); font-size:10px;">
+                        [${Math.round(ann.bbox_normalized[0]*100)}, ${Math.round(ann.bbox_normalized[1]*100)} - 
+                         ${Math.round(ann.bbox_normalized[2]*100)}, ${Math.round(ann.bbox_normalized[3]*100)}]
+                    </span>
+                </div>
+                <button class="delete-btn" onclick="deleteAnnotation(${index})">✕</button>
+            </div>
+        `;
+    });
+    list.innerHTML = html;
+    updateAnnotationCount();
+}
+
+function updateAnnotationCount() {
+    const countEl = $('annotationCount');
+    if (countEl) {
+        countEl.textContent = manualAnnotations.length;
+    }
+    $('saveAnnotationsBtn').disabled = manualAnnotations.length === 0;
+}
+
+function clearAllAnnotations() {
+    if (manualAnnotations.length === 0) return;
+    if (!confirm('Alle Annotationen löschen?')) return;
+    
+    manualAnnotations = [];
+    redrawCanvas();
+    updateAnnotationList();
+    updateAnnotationCount();
+    showToast('Alle Annotationen gelöscht', 'success');
+}
+
+function saveManualAnnotations() {
+    // Use professional editor if available
+    if (window.AnnEditor && window.AnnEditor.annotations?.length > 0) {
+        currentSampleAnnotations = window.AnnEditor.getAnnotations();
+        
+        // Editor schließen
+        $('manualAnnotationEditor').style.display = 'none';
+        
+        // Vorschau anzeigen
+        showSampleAnnotations(currentSampleAnnotations);
+        
+        // Hinzufügen-Button aktivieren
+        $('addSampleBtn').disabled = false;
+        
+        showToast(`${currentSampleAnnotations.length} Annotationen gespeichert`, 'success');
+        return;
+    }
+    
+    // Fallback für alten Editor
+    if (manualAnnotations.length === 0) return;
+
+    // Annotationen für Few-Shot konvertieren
+    currentSampleAnnotations = manualAnnotations.map(ann => ({
+        class: ann.class,
+        bbox: [
+            ann.bbox_normalized[0] * currentImage.width,
+            ann.bbox_normalized[1] * currentImage.height,
+            ann.bbox_normalized[2] * currentImage.width,
+            ann.bbox_normalized[3] * currentImage.height
+        ],
+        bbox_normalized: ann.bbox_normalized,
+        confidence: 1.0
+    }));
+    
+    // Editor schließen
+    cancelDrawing();
+    $('manualAnnotationEditor').style.display = 'none';
+    
+    // Vorschau anzeigen
+    showSampleAnnotations(currentSampleAnnotations);
+    
+    // Hinzufügen-Button aktivieren
+    $('addSampleBtn').disabled = false;
+    
+    showToast(`${currentSampleAnnotations.length} Annotationen gespeichert`, 'success');
+}
+
+function setupFewShotDetection() {
+    setupSampleDropzone();
+    setupAutoDetectDropzone();
+    setupAutoDetectThreshold();
+    updateFewShotStatus();
+}
+
+function setupSampleDropzone() {
+    const dz = $('sampleDropzone');
+    const input = $('sampleImage');
+    if (!dz || !input) return;
+
+    dz.addEventListener('click', e => { e.preventDefault(); input.click(); });
+
+    ['dragenter', 'dragover'].forEach(evt => {
+        dz.addEventListener(evt, e => { e.preventDefault(); e.stopPropagation(); dz.classList.add('dragover'); });
+    });
+    ['dragleave', 'drop'].forEach(evt => {
+        dz.addEventListener(evt, e => { e.preventDefault(); e.stopPropagation(); dz.classList.remove('dragover'); });
+    });
+
+    dz.addEventListener('drop', e => {
+        e.preventDefault();
+        const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+        if (files.length) handleSampleFile(files[0]);
+    });
+
+    input.addEventListener('change', e => {
+        if (e.target.files.length) handleSampleFile(e.target.files[0]);
+    });
+}
+
+function setupAutoDetectDropzone() {
+    const dz = $('autoDetectDropzone');
+    const input = $('autoDetectImages');
+    if (!dz || !input) return;
+
+    dz.addEventListener('click', e => { e.preventDefault(); input.click(); });
+
+    ['dragenter', 'dragover'].forEach(evt => {
+        dz.addEventListener(evt, e => { e.preventDefault(); e.stopPropagation(); dz.classList.add('dragover'); });
+    });
+    ['dragleave', 'drop'].forEach(evt => {
+        dz.addEventListener(evt, e => { e.preventDefault(); e.stopPropagation(); dz.classList.remove('dragover'); });
+    });
+
+    dz.addEventListener('drop', e => {
+        e.preventDefault();
+        const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+        handleAutoDetectFiles(files);
+    });
+
+    input.addEventListener('change', e => {
+        const files = Array.from(e.target.files);
+        handleAutoDetectFiles(files);
+    });
+}
+
+function handleAutoDetectFiles(files) {
+    if (!files.length) return;
+    $('autoDetectPrompt').textContent = `${files.length} Bilder ausgewählt`;
+    $('autoDetectBtn').disabled = fewShotSamples.length === 0;
+    log(`${files.length} Bilder für Auto-Detection`, 'info');
+    window._autoDetectFiles = files;
+}
+
+function setupAutoDetectThreshold() {
+    const thresh = $('autoDetectThreshold');
+    if (thresh) {
+        $('autoDetectThresholdValue').textContent = thresh.value;
+        thresh.addEventListener('input', () => {
+            $('autoDetectThresholdValue').textContent = thresh.value;
+        });
+    }
+}
+
+async function annotateSample() {
+    const prompt = $('samplePrompt')?.value?.trim();
+    if (!prompt) { showToast('Bitte Prompt eingeben', 'error'); return; }
+    if (!currentSampleImage) { showToast('Bitte Sample-Bild auswählen', 'error'); return; }
+
+    const btn = $('annotateSampleBtn');
+    btn.disabled = true;
+    btn.textContent = '⏳...';
+
+    try {
+        const formData = new FormData();
+        formData.append('prompt', prompt);
+        formData.append('box_threshold', 0.25);
+        formData.append('image', currentSampleImage);
+
+        const res = await fetch('/dataset/annotate', { method: 'POST', body: formData });
+        const data = await res.json();
+
+        if (!res.ok) throw new Error(data.error);
+
+        currentSampleAnnotations = data.annotations || [];
+        
+        // Vorschau der Annotationen
+        showSampleAnnotations(currentSampleAnnotations);
+        
+        // Hinzufügen-Button aktivieren
+        $('addSampleBtn').disabled = currentSampleAnnotations.length === 0;
+        
+        showToast(`${currentSampleAnnotations.length} Objekte annotiert`, 'success');
+    } catch (err) {
+        showToast(err.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '🏷️ Sample annotieren';
+    }
+}
+
+function showSampleAnnotations(annotations) {
+    const list = $('samplesList');
+    if (!list) return;
+
+    list.innerHTML = `<div style="font-size:11px; color:var(--text-secondary); margin-bottom:4px;">Annotationen:</div>` +
+        annotations.map(a => `
+            <div class="detection-item" style="padding:4px 8px; font-size:11px;">
+                <span class="detection-class">${a.class}</span>
+                <span class="detection-conf">${(a.confidence * 100).toFixed(0)}%</span>
+            </div>
+        `).join('');
+}
+
+async function addSampleToFewShot() {
+    if (!currentSampleImage || !currentSampleAnnotations?.length) {
+        showToast('Keine Annotationen vorhanden', 'error');
+        return;
+    }
+
+    const btn = $('addSampleBtn');
+    btn.disabled = true;
+    btn.textContent = '⏳...';
+
+    try {
+        const formData = new FormData();
+        formData.append('image', currentSampleImage);
+        formData.append('annotations', JSON.stringify(currentSampleAnnotations));
+
+        const res = await fetch('/dataset/fewshot/add_sample', { method: 'POST', body: formData });
+        const data = await res.json();
+
+        if (!res.ok) throw new Error(data.error);
+
+        fewShotSamples.push({
+            image: currentSampleImage,
+            annotations: currentSampleAnnotations
+        });
+
+        updateFewShotStatus();
+        updateSamplesList();
+        
+        // Reset für nächstes Sample
+        currentSampleImage = null;
+        currentSampleAnnotations = null;
+        $('sampleDropPrompt').textContent = 'Beispielbild ablegen';
+        $('samplePrompt').value = '';
+        $('samplesList').innerHTML = '';
+        $('addSampleBtn').disabled = true;
+
+        showToast(data.message, 'success');
+    } catch (err) {
+        showToast(err.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '➕ Hinzufügen';
+    }
+}
+
+function updateFewShotStatus() {
+    const pill = $('fewshotStatusPill');
+    const text = $('fewshotStatusText');
+    const autoDetectBtn = $('autoDetectBtn');
+    
+    if (fewShotSamples.length === 0) {
+        pill.style.background = 'rgba(245,158,11,0.15)';
+        pill.style.color = 'var(--warning)';
+        pill.style.borderColor = 'rgba(245,158,11,0.3)';
+        text.textContent = 'Keine Samples';
+        if (autoDetectBtn) autoDetectBtn.disabled = true;
+    } else if (fewShotSamples.length < 2) {
+        pill.style.background = 'rgba(245,158,11,0.15)';
+        pill.style.color = 'var(--warning)';
+        pill.style.borderColor = 'rgba(245,158,11,0.3)';
+        text.textContent = `${fewShotSamples.length} Sample (mind. 2 empfohlen)`;
+        if (autoDetectBtn) autoDetectBtn.disabled = true;
+    } else {
+        pill.style.background = 'rgba(16,185,129,0.15)';
+        pill.style.color = 'var(--success)';
+        pill.style.borderColor = 'rgba(16,185,129,0.3)';
+        const classes = [...new Set(fewShotSamples.flatMap(s => s.annotations.map(a => a.class)))];
+        text.textContent = `${fewShotSamples.length} Samples • ${classes.length} Klassen`;
+        if (autoDetectBtn) autoDetectBtn.disabled = false;
+    }
+}
+
+function updateSamplesList() {
+    const list = $('samplesList');
+    if (!list || fewShotSamples.length === 0) return;
+
+    let html = '<div style="font-size:11px; color:var(--text-secondary); margin:8px 0 4px;">Gespeicherte Samples:</div>';
+    fewShotSamples.forEach((s, i) => {
+        const classes = [...new Set(s.annotations.map(a => a.class))].join(', ');
+        html += `<div class="model-card" style="padding:8px; margin-bottom:4px;">
+            <div style="font-size:11px; font-weight:600;">Sample ${i + 1}</div>
+            <div style="font-size:10px; color:var(--text-secondary);">${s.annotations.length} Objekte: ${classes}</div>
+        </div>`;
+    });
+    list.innerHTML = html;
+}
+
+async function runAutoDetection() {
+    if (!fewShotSamples.length) {
+        showToast('Bitte zuerst Samples hinzufügen', 'error');
+        return;
+    }
+    if (!window._autoDetectFiles?.length) {
+        showToast('Bitte Bilder zum Labeln auswählen', 'error');
+        return;
+    }
+
+    const btn = $('autoDetectBtn');
+    btn.disabled = true;
+    btn.textContent = '⏳ Verarbeite...';
+
+    const threshold = $('autoDetectThreshold')?.value || 0.7;
+
+    try {
+        const formData = new FormData();
+        formData.append('threshold', threshold);
+        window._autoDetectFiles.forEach((file, i) => {
+            formData.append('images', file);
+        });
+
+        const res = await fetch('/dataset/fewshot/auto_detect', { method: 'POST', body: formData });
+        const data = await res.json();
+
+        if (!res.ok) throw new Error(data.error);
+
+        displayAutoDetectResults(data);
+        showToast(`${data.total_annotations} Objekte automatisch erkannt`, 'success');
+    } catch (err) {
+        showToast(err.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '🎯 Auto-Detect';
+    }
+}
+
+function displayAutoDetectResults(data) {
+    const container = $('autoDetectResults');
+    const content = $('autoDetectResultsContent');
+    if (!container || !content) return;
+
+    container.style.display = 'block';
+
+    let html = `<div class="stats-grid" style="margin-bottom:16px;">`;
+    html += `<div class="stat-card"><div class="stat-value">${data.processed_count}</div><div class="stat-label">Bilder</div></div>`;
+    html += `<div class="stat-card"><div class="stat-value">${data.total_annotations}</div><div class="stat-label">Objekte</div></div>`;
+    html += `</div>`;
+
+    if (data.results?.length) {
+        html += `<div style="display:grid; gap:12px;">`;
+        data.results.forEach((r, i) => {
+            html += `<div class="model-card">
+                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+                    <div>
+                        <div style="font-weight:600;">${r.filename}</div>
+                        <div style="font-size:12px; color:var(--text-secondary);">${r.annotation_count} Objekte</div>
+                    </div>
+                    ${r.annotated_image ? `<a href="${r.annotated_image}" target="_blank" class="ghost" style="padding:4px 8px; font-size:11px;">🖼️ Annotiert</a>` : ''}
+                </div>
+                ${r.annotations?.length ? `<div style="margin-top:8px; display:flex; flex-wrap:wrap; gap:4px;">
+                    ${r.annotations.map(a => `<span class="chip">${a.class} (${(a.confidence * 100).toFixed(0)}%)</span>`).join('')}
+                </div>` : ''}
+            </div>`;
+        });
+        html += `</div>`;
+    }
+
+    content.innerHTML = html;
+}
+
+function clearFewShot() {
+    if (!confirm('Alle Few-Shot Samples löschen?')) return;
+    
+    fetch('/dataset/fewshot/clear', { method: 'POST' })
+        .then(() => {
+            fewShotSamples = [];
+            currentSampleAnnotations = null;
+            currentSampleImage = null;
+            $('samplesList').innerHTML = '';
+            $('autoDetectResults').style.display = 'none';
+            $('autoDetectPrompt').textContent = 'Bilder zum automatischen Labeln';
+            window._autoDetectFiles = null;
+            updateFewShotStatus();
+            showToast('Samples gelöscht', 'success');
+        })
+        .catch(err => showToast(err.message, 'error'));
+}
+
+// Few-Shot Detection zu global exports hinzufügen
+window.setupFewShotDetection = setupFewShotDetection;
+window.annotateSample = annotateSample;
+window.addSampleToFewShot = addSampleToFewShot;
+window.runAutoDetection = runAutoDetection;
+window.clearFewShot = clearFewShot;
+
+// Manual Annotation exports
+window.startDrawing = startDrawing;
+window.cancelDrawing = cancelDrawing;
+window.toggleDrawing = toggleDrawing;
+window.undoLastAnnotation = undoLastAnnotation;
+window.deleteAnnotation = deleteAnnotation;
+window.clearAllAnnotations = clearAllAnnotations;
+window.saveManualAnnotations = saveManualAnnotations;
+window.setClass = setClass;
+
+// ==================== MODEL DOWNLOAD ====================
+let modelCatalog = [];
+let currentFilter = 'all';
+let downloadingModels = {};
+
+async function loadModelCatalog() {
+    try {
+        const res = await fetch('/models/catalog');
+        const data = await res.json();
+        modelCatalog = data.models || [];
+        renderModelCatalog(modelCatalog);
+    } catch (err) {
+        showToast('Fehler: ' + err.message, 'error');
+    }
+}
+
+function toggleModelCatalog() {
+    const catalog = document.getElementById('modelCatalog');
+    if (catalog.style.display === 'none') {
+        catalog.style.display = 'block';
+        if (modelCatalog.length === 0) loadModelCatalog();
+    } else {
+        catalog.style.display = 'none';
+    }
+}
+
+function filterModels(version) {
+    currentFilter = version;
+    document.querySelectorAll('.filter-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.version === version);
+    });
+    
+    if (version === 'all') {
+        renderModelCatalog(modelCatalog);
+    } else {
+        renderModelCatalog(modelCatalog.filter(m => m.version === version));
+    }
+}
+
+function renderModelCatalog(models) {
+    const list = document.getElementById('modelCatalogList');
+    if (!list) return;
+    
+    if (!models.length) {
+        list.innerHTML = '<div class="empty-state">Keine Modelle gefunden</div>';
+        return;
+    }
+    
+    list.innerHTML = models.map(model => {
+        const isDownloading = downloadingModels[model.name];
+        const isInstalled = false; // Will be checked
+        
+        return `
+            <div class="model-catalog-item" id="model-${model.name.replace(/\./g, '-')}">
+                <div class="model-catalog-header">
+                    <span class="model-catalog-name">${model.name}</span>
+                    <span class="model-catalog-version">${model.version}</span>
+                </div>
+                <div class="model-catalog-type">
+                    <span class="tag ${model.type}">${model.type.toUpperCase()}</span>
+                </div>
+                <div class="model-catalog-stats">
+                    <div class="model-catalog-stat">
+                        <div class="value">${model.size}</div>
+                        <div class="label">Größe</div>
+                    </div>
+                    <div class="model-catalog-stat">
+                        <div class="value">${model.speed}</div>
+                        <div class="label">Speed</div>
+                    </div>
+                    <div class="model-catalog-stat">
+                        <div class="value">${model.accuracy}</div>
+                        <div class="label">Genauigkeit</div>
+                    </div>
+                </div>
+                <div class="model-catalog-actions">
+                    ${isDownloading 
+                        ? `<button class="btn btn-primary" disabled>⏳ Lädt... ${isDownloading.progress}%</button>`
+                        : `<button class="btn btn-primary" onclick="downloadModel('${model.name}')">📥 Download</button>`
+                    }
+                </div>
+                ${isDownloading ? `
+                    <div class="download-progress">
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width: ${isDownloading.progress}%"></div>
+                        </div>
+                        <div class="progress-text">
+                            <span>${formatBytes(isDownloading.downloaded)}</span>
+                            <span>${formatBytes(isDownloading.total)}</span>
+                        </div>
+                    </div>
+                ` : ''}
+            </div>
+        `;
+    }).join('');
+}
+
+function formatBytes(bytes) {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
+async function downloadModel(modelName) {
+    const modelEl = document.getElementById(`model-${modelName.replace(/\./g, '-')}`);
+    if (!modelEl) return;
+    
+    // Check if already downloading
+    if (downloadingModels[modelName]) return;
+    
+    // Initialize download state
+    downloadingModels[modelName] = { progress: 0, downloaded: 0, total: 0 };
+    modelEl.classList.add('downloading');
+    
+    try {
+        const res = await fetch(`/models/download_stream/${modelName}`, { method: 'POST' });
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+            
+            for (const line of lines) {
+                if (line.startsWith('data:')) {
+                    try {
+                        const data = JSON.parse(line.slice(5).trim());
+                        
+                        if (data.error) {
+                            throw new Error(data.error);
+                        }
+                        
+                        if (data.progress !== undefined) {
+                            downloadingModels[modelName] = data;
+                            renderModelCatalog(getFilteredModels());
+                        }
+                        
+                        if (data.done) {
+                            downloadingModels[modelName] = null;
+                            modelEl.classList.remove('downloading');
+                            modelEl.classList.add('installed');
+                            showToast(`Modell ${modelName} erfolgreich heruntergeladen!`, 'success');
+                            updateModelList();
+                            return;
+                        }
+                    } catch (e) {
+                        console.error(e);
+                    }
+                }
+            }
+        }
+    } catch (err) {
+        downloadingModels[modelName] = null;
+        modelEl.classList.remove('downloading');
+        showToast('Download fehlgeschlagen: ' + err.message, 'error');
+        renderModelCatalog(getFilteredModels());
+    }
+}
+
+function getFilteredModels() {
+    if (currentFilter === 'all') return modelCatalog;
+    return modelCatalog.filter(m => m.version === currentFilter);
+}

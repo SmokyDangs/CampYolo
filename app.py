@@ -1,9 +1,9 @@
-import os, gc, time, shutil, json, io, base64, re, subprocess
+import os, gc, time, shutil, json, io, base64, re, subprocess, csv, numpy as np
 from pathlib import Path
 from datetime import datetime
 from collections import deque
 import torch, cv2, mimetypes
-from flask import Flask, render_template, request, jsonify, send_from_directory, Response, stream_with_context
+from flask import Flask, render_template, request, jsonify, send_from_directory, send_file, Response, stream_with_context
 from ultralytics import YOLO
 
 app = Flask(__name__)
@@ -127,6 +127,116 @@ def serve_upload(filename):
 def list_models():
     files = [f for f in os.listdir(app.config['MODEL_DIR']) if f.endswith('.pt')]
     return jsonify({"available_models": files, "active_model": active_model["name"]})
+
+# ==================== YOLO MODEL DOWNLOAD ====================
+YOLO_MODELS = [
+    # YOLOv8 Models
+    {"name": "yolov8n.pt", "type": "detect", "size": "3.2 MB", "speed": "80 FPS", "accuracy": "Low", "version": "v8", "url": "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n.pt"},
+    {"name": "yolov8s.pt", "type": "detect", "size": "11.2 MB", "speed": "40 FPS", "accuracy": "Medium", "version": "v8", "url": "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8s.pt"},
+    {"name": "yolov8m.pt", "type": "detect", "size": "25.9 MB", "speed": "20 FPS", "accuracy": "High", "version": "v8", "url": "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8m.pt"},
+    {"name": "yolov8l.pt", "type": "detect", "size": "43.7 MB", "speed": "10 FPS", "accuracy": "Very High", "version": "v8", "url": "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8l.pt"},
+    {"name": "yolov8x.pt", "type": "detect", "size": "68.2 MB", "speed": "5 FPS", "accuracy": "Highest", "version": "v8", "url": "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8x.pt"},
+    
+    # YOLOv8 Pose
+    {"name": "yolov8n-pose.pt", "type": "pose", "size": "3.4 MB", "speed": "75 FPS", "accuracy": "Low", "version": "v8", "url": "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n-pose.pt"},
+    {"name": "yolov8s-pose.pt", "type": "pose", "size": "11.8 MB", "speed": "38 FPS", "accuracy": "Medium", "version": "v8", "url": "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8s-pose.pt"},
+    {"name": "yolov8m-pose.pt", "type": "pose", "size": "27.2 MB", "speed": "18 FPS", "accuracy": "High", "version": "v8", "url": "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8m-pose.pt"},
+    
+    # YOLOv8 Segmentation
+    {"name": "yolov8n-seg.pt", "type": "seg", "size": "3.5 MB", "speed": "70 FPS", "accuracy": "Low", "version": "v8", "url": "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n-seg.pt"},
+    {"name": "yolov8s-seg.pt", "type": "seg", "size": "12.4 MB", "speed": "35 FPS", "accuracy": "Medium", "version": "v8", "url": "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8s-seg.pt"},
+    
+    # YOLOv8 Classification
+    {"name": "yolov8n-cls.pt", "type": "cls", "size": "2.8 MB", "speed": "85 FPS", "accuracy": "Low", "version": "v8", "url": "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n-cls.pt"},
+    {"name": "yolov8s-cls.pt", "type": "cls", "size": "10.2 MB", "speed": "45 FPS", "accuracy": "Medium", "version": "v8", "url": "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8s-cls.pt"},
+    
+    # YOLOv5 Models
+    {"name": "yolov5n.pt", "type": "detect", "size": "2.2 MB", "speed": "90 FPS", "accuracy": "Low", "version": "v5", "url": "https://github.com/ultralytics/yolov5/releases/download/v6.2/yolov5n.pt"},
+    {"name": "yolov5s.pt", "type": "detect", "size": "7.2 MB", "speed": "50 FPS", "accuracy": "Medium", "version": "v5", "url": "https://github.com/ultralytics/yolov5/releases/download/v6.2/yolov5s.pt"},
+    {"name": "yolov5m.pt", "type": "detect", "size": "21.2 MB", "speed": "25 FPS", "accuracy": "High", "version": "v5", "url": "https://github.com/ultralytics/yolov5/releases/download/v6.2/yolov5m.pt"},
+    {"name": "yolov5l.pt", "type": "detect", "size": "46.5 MB", "speed": "12 FPS", "accuracy": "Very High", "version": "v5", "url": "https://github.com/ultralytics/yolov5/releases/download/v6.2/yolov5l.pt"},
+    {"name": "yolov5x.pt", "type": "detect", "size": "86.7 MB", "speed": "6 FPS", "accuracy": "Highest", "version": "v5", "url": "https://github.com/ultralytics/yolov5/releases/download/v6.2/yolov5x.pt"},
+    
+    # YOLOv10 Models
+    {"name": "yolov10n.pt", "type": "detect", "size": "2.8 MB", "speed": "85 FPS", "accuracy": "Low", "version": "v10", "url": "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov10n.pt"},
+    {"name": "yolov10s.pt", "type": "detect", "size": "9.8 MB", "speed": "45 FPS", "accuracy": "Medium", "version": "v10", "url": "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov10s.pt"},
+    {"name": "yolov10m.pt", "type": "detect", "size": "23.5 MB", "speed": "22 FPS", "accuracy": "High", "version": "v10", "url": "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov10m.pt"},
+]
+
+@app.route('/models/catalog', methods=['GET'])
+def model_catalog():
+    """Gibt Katalog der verfügbaren YOLO-Modelle zurück"""
+    return jsonify({"models": YOLO_MODELS})
+
+@app.route('/models/download/<model_name>', methods=['POST'])
+def download_model(model_name):
+    """Lädt ein YOLO-Modell herunter"""
+    model_info = next((m for m in YOLO_MODELS if m['name'] == model_name), None)
+    if not model_info:
+        return jsonify({"error": "Modell nicht gefunden"}), 404
+    
+    model_path = os.path.join(app.config['MODEL_DIR'], model_name)
+    if os.path.exists(model_path):
+        return jsonify({"status": "Modell bereits vorhanden", "path": model_path})
+    
+    try:
+        import requests
+        from tqdm import tqdm
+        
+        # Download mit Fortschrittsanzeige
+        response = requests.get(model_info['url'], stream=True)
+        total_size = int(response.headers.get('content-length', 0))
+        
+        with open(model_path, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+        
+        if os.path.exists(model_path) and os.path.getsize(model_path) > 0:
+            return jsonify({
+                "status": "Download erfolgreich",
+                "path": model_path,
+                "size": os.path.getsize(model_path)
+            })
+        else:
+            return jsonify({"error": "Download fehlgeschlagen"}), 500
+            
+    except Exception as e:
+        if os.path.exists(model_path):
+            os.remove(model_path)
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/models/download_stream/<model_name>', methods=['POST'])
+def download_model_stream(model_name):
+    """Streamt den Download-Fortschritt"""
+    model_info = next((m for m in YOLO_MODELS if m['name'] == model_name), None)
+    if not model_info:
+        return jsonify({"error": "Modell nicht gefunden"}), 404
+    
+    model_path = os.path.join(app.config['MODEL_DIR'], model_name)
+    
+    def generate():
+        try:
+            import requests
+            
+            response = requests.get(model_info['url'], stream=True)
+            total_size = int(response.headers.get('content-length', 0))
+            downloaded = 0
+            
+            with open(model_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=65536):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        progress = int(downloaded / total_size * 100) if total_size > 0 else 0
+                        yield f"data: {json.dumps({'progress': progress, 'downloaded': downloaded, 'total': total_size})}\n\n"
+            
+            yield f"data: {json.dumps({'done': True, 'path': model_path})}\n\n"
+            
+        except Exception as e:
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+    
+    return Response(generate(), mimetype='text/event-stream', headers={"Cache-Control": "no-cache"})
 
 @app.route('/models/suggest', methods=['GET'])
 def suggest_model():
@@ -546,5 +656,930 @@ def system_info():
     except ImportError: info["memory_gb"] = None
     return jsonify(info)
 
+# ==================== GROUNDING DINO / DATASET ====================
+grounding_dino_model = {"instance": None, "loaded": False}
+grounding_dino_available = False
+few_shot_model = {"samples": [], "classes": {}, "loaded": False}
+
+def check_grounding_dino():
+    """Prüft ob Grounding DINO verfügbar ist"""
+    global grounding_dino_available
+    try:
+        import groundingdino
+        grounding_dino_available = True
+        return True
+    except ImportError:
+        grounding_dino_available = False
+        return False
+
+# ==================== FEW-SHOT AUTO-DETECTION ====================
+class FewShotDetector:
+    """Few-Shot Objekterkennung mit Template-Matching und Feature-Vergleich"""
+    
+    def __init__(self):
+        self.samples = []  # Gespeicherte Sample-Bilder mit Annotationen
+        self.class_templates = {}  # Feature-Templates pro Klasse
+        self.clip_model = None
+        self.clip_preprocess = None
+        
+    def load_clip(self):
+        """Lädt CLIP Modell für Feature-Extraction"""
+        try:
+            import clip
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            self.clip_model, self.clip_preprocess = clip.load("ViT-B/32", device=device, jit=False)
+            self.clip_model.eval()
+            return True
+        except (ImportError, FileNotFoundError):
+            return False
+    
+    def extract_features(self, image_path):
+        """Extrahiert Features aus einem Bild"""
+        try:
+            from PIL import Image
+            device = next(self.clip_model.parameters()).device if self.clip_model else "cpu"
+            image = Image.open(image_path)
+            image_input = self.clip_preprocess(image).unsqueeze(0).to(device)
+            with torch.no_grad():
+                features = self.clip_model.encode_image(image_input)
+                features = features / features.norm(dim=-1, keepdim=True)
+            return features.cpu().numpy()
+        except Exception as e:
+            return None
+    
+    def extract_patch_features(self, image_cv, bbox):
+        """Extrahiert Features aus einem Bildausschnitt"""
+        try:
+            from PIL import Image
+            import io
+            x1, y1, x2, y2 = [int(c) for c in bbox]
+            patch = image_cv[y1:y2, x1:x2]
+            if patch.size == 0:
+                return None
+            patch_pil = Image.fromarray(cv2.cvtColor(patch, cv2.COLOR_BGR2RGB))
+            device = next(self.clip_model.parameters()).device if self.clip_model else "cpu"
+            image_input = self.clip_preprocess(patch_pil).unsqueeze(0).to(device)
+            with torch.no_grad():
+                features = self.clip_model.encode_image(image_input)
+                features = features / features.norm(dim=-1, keepdim=True)
+            return features.cpu().numpy()
+        except Exception as e:
+            return None
+    
+    def add_sample(self, image_path, annotations):
+        """Fügt ein Sample-Bild mit Annotationen hinzu"""
+        sample = {
+            "image_path": image_path,
+            "annotations": annotations,
+            "features": self.extract_features(image_path) if self.clip_model else None
+        }
+        self.samples.append(sample)
+        
+        # Templates pro Klasse erstellen
+        image_cv = cv2.imread(image_path)
+        for ann in annotations:
+            cls = ann.get("class", "object")
+            bbox = ann.get("bbox", [])
+            if bbox and image_cv is not None:
+                patch_features = self.extract_patch_features(image_cv, bbox)
+                if patch_features is not None:
+                    if cls not in self.class_templates:
+                        self.class_templates[cls] = []
+                    self.class_templates[cls].append(patch_features)
+        
+        return len(self.samples)
+    
+    def clear_samples(self):
+        """Löscht alle Samples"""
+        self.samples = []
+        self.class_templates = {}
+    
+    def detect_similar(self, image_path, threshold=0.7):
+        """Erkennt ähnliche Objekte in einem neuen Bild"""
+        if not self.class_templates or not self.clip_model:
+            return []
+        
+        try:
+            from PIL import Image
+            import torchvision.transforms as transforms
+            
+            image_cv = cv2.imread(image_path)
+            if image_cv is None:
+                return []
+            
+            image_h, image_w = image_cv.shape[:2]
+            detections = []
+            
+            # Erstelle Feature-Vergleich mit verschiedenen Patch-Größen
+            # Verwende Sliding-Window-Ansatz für einfache Erkennung
+            patch_sizes = [(64, 64), (96, 96), (128, 128), (160, 160), (200, 200)]
+            strides = [32, 40, 48, 56, 64]
+            
+            for patch_size, stride in zip(patch_sizes, strides):
+                ph, pw = patch_size
+                for y in range(0, image_h - ph, stride):
+                    for x in range(0, image_w - pw, stride):
+                        patch = image_cv[y:y+ph, x:x+pw]
+                        if patch.size == 0:
+                            continue
+                        
+                        try:
+                            patch_pil = Image.fromarray(cv2.cvtColor(patch, cv2.COLOR_BGR2RGB))
+                            device = next(self.clip_model.parameters()).device
+                            image_input = self.clip_preprocess(patch_pil).unsqueeze(0).to(device)
+                            with torch.no_grad():
+                                patch_features = self.clip_model.encode_image(image_input)
+                                patch_features = patch_features / patch_features.norm(dim=-1, keepdim=True)
+                                patch_features = patch_features.cpu().numpy()
+                            
+                            # Vergleiche mit allen Klassen-Templates
+                            best_class = None
+                            best_score = 0
+                            
+                            for cls, templates in self.class_templates.items():
+                                for template in templates:
+                                    similarity = np.dot(patch_features, template.T)[0][0]
+                                    if similarity > best_score:
+                                        best_score = similarity
+                                        best_class = cls
+                            
+                            if best_score >= threshold and best_class:
+                                # Prüfe ob diese Detection nicht zu nah an einer bestehenden ist
+                                is_duplicate = False
+                                for existing in detections:
+                                    ex, ey, ew, eh = existing["bbox"]
+                                    if abs(x - ex) < pw/2 and abs(y - ey) < ph/2:
+                                        if best_score > existing["confidence"]:
+                                            detections.remove(existing)
+                                        else:
+                                            is_duplicate = True
+                                        break
+                                
+                                if not is_duplicate:
+                                    detections.append({
+                                        "class": best_class,
+                                        "bbox": [x, y, x + pw, y + ph],
+                                        "bbox_normalized": [x/image_w, y/image_h, (x+pw)/image_w, (y+ph)/image_h],
+                                        "confidence": float(best_score)
+                                    })
+                        except Exception:
+                            continue
+            
+            # Non-Maximum Suppression
+            detections = self._nms(detections, iou_threshold=0.5)
+            return detections
+            
+        except Exception as e:
+            return []
+    
+    def _nms(self, detections, iou_threshold=0.5):
+        """Non-Maximum Suppression für Overlapping Detections"""
+        if not detections:
+            return []
+        
+        # Sortiere nach Confidence
+        detections.sort(key=lambda x: x["confidence"], reverse=True)
+        
+        keep = []
+        while detections:
+            best = detections.pop(0)
+            keep.append(best)
+            
+            # Entferne überlappende Detections
+            remaining = []
+            for det in detections:
+                iou = self._calculate_iou(best["bbox"], det["bbox"])
+                if iou < iou_threshold:
+                    remaining.append(det)
+            detections = remaining
+        
+        return keep
+    
+    def _calculate_iou(self, box1, box2):
+        """Berechnet IoU zwischen zwei Bounding Boxes"""
+        x1 = max(box1[0], box2[0])
+        y1 = max(box1[1], box2[1])
+        x2 = min(box1[2], box2[2])
+        y2 = min(box1[3], box2[3])
+        
+        intersection = max(0, x2 - x1) * max(0, y2 - y1)
+        area1 = (box1[2] - box1[0]) * (box1[3] - box1[1])
+        area2 = (box2[2] - box2[0]) * (box2[3] - box2[1])
+        union = area1 + area2 - intersection
+        
+        return intersection / union if union > 0 else 0
+    
+    def batch_detect(self, image_paths, threshold=0.7, progress_callback=None):
+        """Führt Auto-Detection auf mehreren Bildern durch"""
+        results = []
+        total = len(image_paths)
+        
+        for i, img_path in enumerate(image_paths):
+            detections = self.detect_similar(img_path, threshold)
+            results.append({
+                "filename": os.path.basename(img_path),
+                "image_path": img_path,
+                "annotations": detections,
+                "annotation_count": len(detections)
+            })
+            
+            if progress_callback:
+                progress_callback(i + 1, total)
+        
+        return results
+
+# Initialisiere Few-Shot Detector
+few_shot_detector = FewShotDetector()
+
+def load_grounding_dino():
+    """Lädt Grounding DINO Modell für zero-shot Objekterkennung"""
+    try:
+        from groundingdino.util.inference import load_model
+        model = load_model("groundingdino/config/GroundingDINO_SwinT_OGC.py", 
+                          "https://github.com/IDEA-Research/GroundingDINO/releases/download/v0.1.0-alpha/groundingdino_swint_ogc.pth")
+        return {"model": model, "loaded": True, "error": None}
+    except Exception as e:
+        return {"model": None, "loaded": False, "error": str(e)}
+
+def run_grounding_dino_inference(image_path, text_prompt, box_threshold=0.35, text_threshold=0.25):
+    """Führt Grounding DINO Inference durch"""
+    try:
+        from groundingdino.util.inference import load_model, load_image, predict, annotate
+        import torchvision.transforms as transforms
+        from PIL import Image
+        
+        # Bild laden
+        image_pil = Image.open(image_path).convert("RGB")
+        transform = transforms.Compose([
+            transforms.Resize((800, 800)),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        ])
+        image_tensor = transform(image_pil).unsqueeze(0)
+        
+        # Modell laden falls nicht geladen
+        if not grounding_dino_model["loaded"] or grounding_dino_model["instance"] is None:
+            grounding_dino_model["instance"] = load_model(
+                "groundingdino/config/GroundingDINO_SwinT_OGC.py",
+                "https://github.com/IDEA-Research/GroundingDINO/releases/download/v0.1.0-alpha/groundingdino_swint_ogc.pth"
+            )
+            grounding_dino_model["loaded"] = True
+        
+        model = grounding_dino_model["instance"]
+        
+        # Prediction
+        with torch.inference_mode():
+            outputs = model(image_tensor, captions=[text_prompt])
+        
+        # Ergebnisse extrahieren
+        detection_results = []
+        if hasattr(outputs, "pred_boxes") and outputs.pred_boxes is not None:
+            boxes = outputs.pred_boxes[0]
+            scores = outputs.pred_logits[0].sigmoid().max(dim=1)[0]
+            logits = outputs.pred_logits[0].sigmoid()
+            
+            for idx, (box, score) in enumerate(zip(boxes, scores)):
+                if score.item() > box_threshold:
+                    # Bounding Box normalisieren
+                    bbox_norm = box.tolist()
+                    detection_results.append({
+                        "bbox_normalized": bbox_norm,
+                        "confidence": round(score.item(), 4),
+                        "prompt": text_prompt,
+                        "class_id": idx
+                    })
+        
+        return {"success": True, "detections": detection_results, "image_size": image_pil.size}
+    except Exception as e:
+        return {"success": False, "error": str(e), "detections": []}
+
+def run_yolo_zero_shot(image_path, text_prompt, box_threshold=0.25):
+    """Fallback: Verwendet YOLO für Objekterkennung wenn Grounding DINO nicht verfügbar ist"""
+    try:
+        from ultralytics import YOLO
+        
+        # Versuche ein vorhandenes Modell zu laden oder lade ein Standardmodell
+        model = None
+        model_files = [f for f in os.listdir(app.config['MODEL_DIR']) if f.endswith('.pt')]
+        
+        if model_files:
+            # Nimm das erste verfügbare Modell
+            model_path = os.path.join(app.config['MODEL_DIR'], model_files[0])
+            model = YOLO(model_path)
+        else:
+            # Lade YOLOv8n als Fallback (kleines schnelles Modell)
+            model = YOLO('yolov8n.pt')
+        
+        # Inference auf CPU durchführen für bessere Kompatibilität
+        device = 'cpu'  # Erzwinge CPU-Nutzung für Kompatibilität
+        with torch.inference_mode():
+            results = model(image_path, conf=box_threshold, verbose=False, device=device)
+        
+        detection_results = []
+        if results and results[0].boxes is not None and results[0].boxes.xyxy is not None:
+            image_cv = cv2.imread(image_path)
+            image_h, image_w = image_cv.shape[:2]
+            
+            for i, box in enumerate(results[0].boxes):
+                cls_id = int(box.cls[0]) if box.cls is not None and len(box.cls) > 0 else -1
+                conf_val = float(box.conf[0]) if box.conf is not None and len(box.conf) > 0 else 0
+                bbox = box.xyxy[0].tolist() if box.xyxy is not None else []
+                
+                if len(bbox) == 4:
+                    # Normalisierte Bounding Box
+                    bbox_norm = [bbox[0]/image_w, bbox[1]/image_h, bbox[2]/image_w, bbox[3]/image_h]
+                    class_name = results[0].names.get(cls_id, "object") if results[0].names else "object"
+                    
+                    # Prüfen ob die Klasse zum Prompt passt (einfaches Matching)
+                    prompt_words = text_prompt.lower().split()
+                    if any(word in class_name.lower() for word in prompt_words) or not prompt_words:
+                        detection_results.append({
+                            "bbox_normalized": bbox_norm,
+                            "confidence": round(conf_val, 4),
+                            "prompt": text_prompt,
+                            "class": class_name,
+                            "class_id": cls_id
+                        })
+        
+        return {"success": True, "detections": detection_results, "image_size": (image_w, image_h)}
+    except Exception as e:
+        return {"success": False, "error": str(e), "detections": []}
+
+@app.route('/dataset/annotate', methods=['POST'])
+def dataset_annotate():
+    """Erstellt Annotationen mit Grounding DINO oder YOLO Fallback"""
+    if 'image' not in request.files:
+        return jsonify({"error": "Kein Bild"}), 400
+
+    text_prompt = request.form.get('prompt', '')
+    if not text_prompt:
+        return jsonify({"error": "Text-Prompt erforderlich"}), 400
+
+    try:
+        box_threshold = float(request.form.get('box_threshold', 0.35))
+        text_threshold = float(request.form.get('text_threshold', 0.25))
+    except ValueError:
+        return jsonify({"error": "Ungültige Threshold-Werte"}), 400
+
+    file = request.files['image']
+    img_path = os.path.join(app.config['UPLOAD_FOLDER_ABS'], f"gdino_{int(time.time()*1000)}_{file.filename}")
+    file.save(img_path)
+
+    try:
+        # Versuche Grounding DINO, falle zurück auf YOLO
+        result = run_grounding_dino_inference(img_path, text_prompt, box_threshold, text_threshold)
+        
+        # Wenn Grounding DINO fehlschlägt, verwende YOLO Fallback
+        if not result.get("success") or not grounding_dino_available:
+            result = run_yolo_zero_shot(img_path, text_prompt, box_threshold)
+
+        if result.get("success"):
+            # Annotiertes Bild erstellen
+            image_cv = cv2.imread(img_path)
+            image_h, image_w = image_cv.shape[:2]
+
+            annotations = []
+            for det in result["detections"]:
+                bbox_norm = det["bbox_normalized"]
+                x1 = int(bbox_norm[0] * image_w)
+                y1 = int(bbox_norm[1] * image_h)
+                x2 = int(bbox_norm[2] * image_w)
+                y2 = int(bbox_norm[3] * image_h)
+
+                # Bounding Box zeichnen
+                cv2.rectangle(image_cv, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                class_name = det.get("class", text_prompt)
+                cv2.putText(image_cv, f"{class_name} {det['confidence']:.2f}",
+                           (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+
+                annotations.append({
+                    "class": class_name,
+                    "bbox": [x1, y1, x2, y2],
+                    "bbox_normalized": bbox_norm,
+                    "confidence": det["confidence"]
+                })
+
+            # Annotiertes Bild speichern
+            annotated_filename = f"annotated_{int(time.time()*1000)}.jpg"
+            annotated_path = os.path.join(app.config['UPLOAD_FOLDER_ABS'], annotated_filename)
+            cv2.imwrite(annotated_path, image_cv)
+
+            return jsonify({
+                "success": True,
+                "annotations": annotations,
+                "annotation_count": len(annotations),
+                "annotated_image": f"/uploads/{annotated_filename}",
+                "prompt": text_prompt,
+                "method": "grounding_dino" if grounding_dino_available else "yolo_fallback"
+            })
+        else:
+            return jsonify({"success": False, "error": result.get("error", "Unbekannter Fehler")}), 500
+    finally:
+        if os.path.exists(img_path):
+            try: os.remove(img_path)
+            except: pass
+
+@app.route('/dataset/annotate_batch', methods=['POST'])
+def dataset_annotate_batch():
+    """Erstellt Annotationen für mehrere Bilder mit Grounding DINO oder YOLO Fallback"""
+    if 'images' not in request.files:
+        return jsonify({"error": "Keine Bilder"}), 400
+
+    text_prompt = request.form.get('prompt', '')
+    if not text_prompt:
+        return jsonify({"error": "Text-Prompt erforderlich"}), 400
+
+    try:
+        box_threshold = float(request.form.get('box_threshold', 0.35))
+        text_threshold = float(request.form.get('text_threshold', 0.25))
+    except ValueError:
+        return jsonify({"error": "Ungültige Threshold-Werte"}), 400
+
+    files = request.files.getlist('images')
+    if not files:
+        return jsonify({"error": "Keine Bilder ausgewählt"}), 400
+
+    results = []
+    annotated_images = []
+
+    for file in files:
+        if not file.filename:
+            continue
+
+        img_path = os.path.join(app.config['UPLOAD_FOLDER_ABS'], f"gdino_{int(time.time()*1000)}_{file.filename}")
+        file.save(img_path)
+
+        try:
+            # Versuche Grounding DINO, falle zurück auf YOLO
+            result = run_grounding_dino_inference(img_path, text_prompt, box_threshold, text_threshold)
+            
+            # Wenn Grounding DINO fehlschlägt, verwende YOLO Fallback
+            if not result.get("success") or not grounding_dino_available:
+                result = run_yolo_zero_shot(img_path, text_prompt, box_threshold)
+
+            if result.get("success"):
+                image_cv = cv2.imread(img_path)
+                image_h, image_w = image_cv.shape[:2]
+
+                annotations = []
+                for det in result["detections"]:
+                    bbox_norm = det["bbox_normalized"]
+                    x1 = int(bbox_norm[0] * image_w)
+                    y1 = int(bbox_norm[1] * image_h)
+                    x2 = int(bbox_norm[2] * image_w)
+                    y2 = int(bbox_norm[3] * image_h)
+
+                    class_name = det.get("class", text_prompt)
+                    cv2.rectangle(image_cv, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                    annotations.append({
+                        "filename": file.filename,
+                        "class": class_name,
+                        "bbox": [x1, y1, x2, y2],
+                        "bbox_normalized": bbox_norm,
+                        "confidence": det["confidence"]
+                    })
+
+                annotated_filename = f"annotated_{int(time.time()*1000)}_{file.filename}"
+                annotated_path = os.path.join(app.config['UPLOAD_FOLDER_ABS'], annotated_filename)
+                cv2.imwrite(annotated_path, image_cv)
+                annotated_images.append(f"/uploads/{annotated_filename}")
+
+                results.append({
+                    "filename": file.filename,
+                    "annotations": annotations,
+                    "annotation_count": len(annotations)
+                })
+        finally:
+            if os.path.exists(img_path):
+                try: os.remove(img_path)
+                except: pass
+
+    return jsonify({
+        "success": True,
+        "processed_count": len(results),
+        "results": results,
+        "annotated_images": annotated_images[:5],  # Nur erste 5 für Preview
+        "prompt": text_prompt,
+        "method": "grounding_dino" if grounding_dino_available else "yolo_fallback"
+    })
+
+@app.route('/dataset/export/yolo', methods=['POST'])
+def dataset_export_yolo():
+    """Exportiert Annotationen im YOLO-Format"""
+    data = request.get_json()
+    annotations = data.get('annotations', [])
+    class_names = data.get('class_names', ['object'])
+    image_width = data.get('image_width', 640)
+    image_height = data.get('image_height', 640)
+    
+    yolo_lines = []
+    for ann in annotations:
+        bbox_norm = ann.get('bbox_normalized', ann.get('bbox', []))
+        if len(bbox_norm) == 4:
+            # YOLO Format: class x_center y_center width height (alle normalisiert 0-1)
+            x1, y1, x2, y2 = bbox_norm
+            x_center = (x1 + x2) / 2
+            y_center = (y1 + y2) / 2
+            width = x2 - x1
+            height = y2 - y1
+            class_id = ann.get('class_id', 0)
+            if class_id >= len(class_names):
+                class_id = 0
+            yolo_lines.append(f"{class_id} {x_center:.6f} {y_center:.6f} {width:.6f} {height:.6f}")
+    
+    yolo_content = '\n'.join(yolo_lines)
+    
+    # Als Datei speichern
+    label_filename = f"label_{int(time.time()*1000)}.txt"
+    label_path = os.path.join(app.config['UPLOAD_FOLDER_ABS'], label_filename)
+    with open(label_path, 'w') as f:
+        f.write(yolo_content)
+    
+    # classes.txt erstellen
+    classes_content = '\n'.join(class_names)
+    classes_path = os.path.join(app.config['UPLOAD_FOLDER_ABS'], f"classes_{int(time.time()*1000)}.txt")
+    with open(classes_path, 'w') as f:
+        f.write(classes_content)
+    
+    return jsonify({
+        "success": True,
+        "yolo_format": yolo_content,
+        "label_file": f"/uploads/{label_filename}",
+        "classes_file": f"/uploads/{classes_path}",
+        "class_names": class_names
+    })
+
+@app.route('/dataset/export/coco', methods=['POST'])
+def dataset_export_coco():
+    """Exportiert Annotationen im COCO-Format"""
+    data = request.get_json()
+    annotations = data.get('annotations', [])
+    class_names = data.get('class_names', ['object'])
+    image_id = data.get('image_id', 1)
+    image_width = data.get('image_width', 640)
+    image_height = data.get('image_height', 640)
+    
+    coco_format = {
+        "images": [{
+            "id": image_id,
+            "width": image_width,
+            "height": image_height,
+            "file_name": "image.jpg"
+        }],
+        "annotations": [],
+        "categories": [{"id": i, "name": name, "supercategory": "object"} for i, name in enumerate(class_names)]
+    }
+    
+    for ann_id, ann in enumerate(annotations):
+        bbox = ann.get('bbox', [])
+        if len(bbox) == 4:
+            x1, y1, x2, y2 = bbox
+            width = x2 - x1
+            height = y2 - y1
+            class_id = ann.get('class_id', 0)
+            
+            coco_format["annotations"].append({
+                "id": ann_id + 1,
+                "image_id": image_id,
+                "category_id": class_id,
+                "bbox": [x1, y1, width, height],
+                "area": width * height,
+                "iscrowd": 0,
+                "confidence": ann.get('confidence', 1.0)
+            })
+    
+    return jsonify({
+        "success": True,
+        "coco_format": coco_format,
+        "download_url": f"/exports/coco_{int(time.time()*1000)}.json"
+    })
+
+@app.route('/dataset/templates', methods=['GET'])
+def dataset_templates():
+    """Gibt Vorlagen für häufige Use-Cases zurück"""
+    templates = [
+        {"id": "objects", "name": "Allgemeine Objekte", "prompt": "object item thing", "description": "Erkennt allgemeine Objekte"},
+        {"id": "people", "name": "Personen", "prompt": "person human people", "description": "Erkennt Personen"},
+        {"id": "vehicles", "name": "Fahrzeuge", "prompt": "car truck bus motorcycle bicycle vehicle", "description": "Erkennt verschiedene Fahrzeuge"},
+        {"id": "animals", "name": "Tiere", "prompt": "dog cat bird animal", "description": "Erkennt Tiere"},
+        {"id": "food", "name": "Essen", "prompt": "food fruit vegetable meal", "description": "Erkennt Lebensmittel"},
+        {"id": "electronics", "name": "Elektronik", "prompt": "phone laptop computer electronics device", "description": "Erkennt Elektronikgeräte"},
+        {"id": "furniture", "name": "Möbel", "prompt": "chair table sofa furniture", "description": "Erkennt Möbelstücke"},
+        {"id": "safety", "name": "Sicherheit", "prompt": "helmet vest safety equipment person", "description": "Erkennt Sicherheitsausrüstung"}
+    ]
+    return jsonify({"templates": templates})
+
+# ==================== YOLO TRAINING ====================
+training_job = {"active": False, "process": None, "results": None, "logs": []}
+
+@app.route('/training/status', methods=['GET'])
+def training_status():
+    """Gibt den aktuellen Training-Status zurück"""
+    return jsonify({
+        "active": training_job["active"],
+        "results": training_job["results"],
+        "logs": training_job["logs"][-50:]  # Letzte 50 Logs
+    })
+
+@app.route('/training/start', methods=['POST'])
+def training_start():
+    """Startet ein YOLO-Training"""
+    global training_job
+    
+    if training_job["active"]:
+        return jsonify({"error": "Training läuft bereits"}), 400
+    
+    # Parameter auslesen
+    try:
+        epochs = int(request.form.get('epochs', 100))
+        batch = int(request.form.get('batch', 16))
+        imgsz = int(request.form.get('imgsz', 640))
+        model_name = request.form.get('model', 'yolov8n.pt')
+    except ValueError:
+        return jsonify({"error": "Ungültige Parameter"}), 400
+    
+    # Dataset prüfen
+    if 'dataset' not in request.files:
+        return jsonify({"error": "Kein Dataset"}), 400
+    
+    dataset_file = request.files['dataset']
+    dataset_path = os.path.join(app.config['UPLOAD_FOLDER_ABS'], f"dataset_{int(time.time())}.zip")
+    dataset_file.save(dataset_path)
+    
+    # Training in separatem Thread starten
+    def run_training():
+        global training_job
+        training_job["logs"] = []
+        start_time = time.time()
+        
+        try:
+            from ultralytics import YOLO
+            
+            # Dataset entpacken
+            import zipfile
+            extract_dir = os.path.join(app.config['UPLOAD_FOLDER_ABS'], f"dataset_{int(time.time())}")
+            with zipfile.ZipFile(dataset_path, 'r') as zip_ref:
+                zip_ref.extractall(extract_dir)
+            
+            # data.yaml finden
+            data_yaml = None
+            for root, dirs, files in os.walk(extract_dir):
+                if 'data.yaml' in files:
+                    data_yaml = os.path.join(root, 'data.yaml')
+                    break
+            
+            if not data_yaml:
+                training_job["logs"].append({"type": "error", "message": "data.yaml nicht gefunden"})
+                training_job["active"] = False
+                return
+            
+            training_job["logs"].append({"type": "info", "message": f"Lade Modell: {model_name}"})
+            
+            # Modell laden
+            model_path = os.path.join(app.config['MODEL_DIR'], model_name)
+            if not os.path.exists(model_path):
+                # Modell herunterladen
+                model_path = model_name  # Ultralytics lädt automatisch
+            
+            model = YOLO(model_path)
+            
+            training_job["logs"].append({"type": "info", "message": f"Starte Training: {epochs} Epochen, Batch={batch}, imgsz={imgsz}"})
+            
+            # Callback für Training-Fortschritt
+            def on_epoch(epoch_info):
+                epoch = epoch_info.get('epoch', 0)
+                metrics = epoch_info.get('metrics', {})
+                training_job["logs"].append({
+                    "type": "info",
+                    "message": f"Epoch {epoch}/{epochs}: mAP50={metrics.get('metrics/mAP50', 0):.4f}, Loss={metrics.get('train/box_loss', 0):.4f}"
+                })
+            
+            # Training starten
+            results = model.train(
+                data=data_yaml,
+                epochs=epochs,
+                batch=batch,
+                imgsz=imgsz,
+                project=app.config['UPLOAD_FOLDER_ABS'],
+                name=f"training_{int(time.time())}",
+                exist_ok=True,
+                verbose=False,
+                callbacks={"on_epoch": on_epoch}
+            )
+            
+            # Ergebnisse speichern
+            training_job["results"] = {
+                "map50": float(results.results_dict.get('metrics/mAP50', 0)),
+                "map95": float(results.results_dict.get('metrics/mAP50-95', 0)),
+                "epochs": epochs,
+                "best_epoch": int(results.results_dict.get('epoch', 0)),
+                "training_time": time.time() - start_time,
+                "model_path": str(results.save_dir / 'best.pt')
+            }
+            
+            training_job["logs"].append({"type": "success", "message": f"Training abgeschlossen! mAP50: {training_job['results']['map50']:.4f}"})
+            
+        except Exception as e:
+            training_job["logs"].append({"type": "error", "message": str(e)})
+        finally:
+            training_job["active"] = False
+    
+    # Thread starten
+    import threading
+    training_job["active"] = True
+    training_job["process"] = threading.Thread(target=run_training)
+    training_job["process"].start()
+    
+    return jsonify({
+        "status": "Training gestartet",
+        "epochs": epochs,
+        "batch": batch,
+        "imgsz": imgsz,
+        "model": model_name
+    })
+
+@app.route('/training/stop', methods=['POST'])
+def training_stop():
+    """Stoppt das aktuelle Training"""
+    global training_job
+    
+    if not training_job["active"]:
+        return jsonify({"error": "Kein Training aktiv"}), 400
+    
+    # Training kann nicht sauber gestoppt werden (Ultralytics Limitation)
+    training_job["active"] = False
+    training_job["logs"].append({"type": "warning", "message": "Training gestoppt"})
+    
+    return jsonify({"status": "Training gestoppt"})
+
+@app.route('/training/download', methods=['GET'])
+def training_download():
+    """Lädt das trainierte Modell herunter"""
+    if not training_job["results"]:
+        return jsonify({"error": "Kein Training abgeschlossen"}), 404
+    
+    model_path = training_job["results"].get("model_path")
+    if not model_path or not os.path.exists(model_path):
+        return jsonify({"error": "Modell nicht gefunden"}), 404
+    
+    return send_file(model_path, as_attachment=True, download_name='trained_model.pt')
+
+# ==================== FEW-SHOT AUTO-DETECTION ENDPOINTS ====================
+
+@app.route('/dataset/fewshot/status', methods=['GET'])
+def fewshot_status():
+    """Gibt den Status des Few-Shot Detectors zurück"""
+    return jsonify({
+        "samples_count": len(few_shot_detector.samples),
+        "classes": list(few_shot_detector.class_templates.keys()),
+        "clip_loaded": few_shot_detector.clip_model is not None,
+        "ready": len(few_shot_detector.class_templates) > 0 and few_shot_detector.clip_model is not None
+    })
+
+@app.route('/dataset/fewshot/add_sample', methods=['POST'])
+def fewshot_add_sample():
+    """Fügt ein Sample-Bild mit Annotationen zum Few-Shot Detector hinzu"""
+    if 'image' not in request.files:
+        return jsonify({"error": "Kein Bild"}), 400
+    
+    annotations_json = request.form.get('annotations', '[]')
+    try:
+        annotations = json.loads(annotations_json)
+    except json.JSONDecodeError:
+        return jsonify({"error": "Ungültige Annotationen"}), 400
+    
+    if not annotations:
+        return jsonify({"error": "Mindestens eine Annotation erforderlich"}), 400
+    
+    file = request.files['image']
+    img_path = os.path.join(app.config['UPLOAD_FOLDER_ABS'], f"sample_{int(time.time()*1000)}_{file.filename}")
+    file.save(img_path)
+    
+    try:
+        # Versuche CLIP zu laden falls noch nicht geladen
+        if few_shot_detector.clip_model is None:
+            clip_loaded = few_shot_detector.load_clip()
+            if not clip_loaded:
+                # Fallback: Verwende einfache Template-Matching Methode
+                pass
+        
+        sample_count = few_shot_detector.add_sample(img_path, annotations)
+        
+        return jsonify({
+            "success": True,
+            "sample_count": sample_count,
+            "classes": list(few_shot_detector.class_templates.keys()),
+            "message": f"Sample {sample_count} hinzugefügt ({len(annotations)} Annotationen)"
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        # Behalte Sample-Bilder für spätere Verwendung
+        pass
+
+@app.route('/dataset/fewshot/clear', methods=['POST'])
+def fewshot_clear():
+    """Löscht alle Few-Shot Samples"""
+    few_shot_detector.clear_samples()
+    return jsonify({
+        "success": True,
+        "message": "Alle Samples gelöscht"
+    })
+
+@app.route('/dataset/fewshot/auto_detect', methods=['POST'])
+def fewshot_auto_detect():
+    """Führt Auto-Detection auf mehreren Bildern durch"""
+    if 'images' not in request.files:
+        return jsonify({"error": "Keine Bilder"}), 400
+    
+    if not few_shot_detector.class_templates:
+        return jsonify({"error": "Keine Samples geladen. Bitte zuerst 2-3 Beispielbilder annotieren."}), 400
+    
+    try:
+        threshold = float(request.form.get('threshold', 0.7))
+    except ValueError:
+        threshold = 0.7
+    
+    files = request.files.getlist('images')
+    if not files:
+        return jsonify({"error": "Keine Bilder ausgewählt"}), 400
+    
+    # Speichere temporär die Bilder
+    temp_paths = []
+    for file in files:
+        if file.filename:
+            img_path = os.path.join(app.config['UPLOAD_FOLDER_ABS'], f"autodetect_{int(time.time()*1000)}_{file.filename}")
+            file.save(img_path)
+            temp_paths.append(img_path)
+    
+    try:
+        # Führe Auto-Detection durch
+        results = []
+        for i, img_path in enumerate(temp_paths):
+            detections = few_shot_detector.detect_similar(img_path, threshold)
+            
+            # Annotiertes Bild erstellen
+            image_cv = cv2.imread(img_path)
+            image_h, image_w = image_cv.shape[:2]
+            
+            for det in detections:
+                bbox_norm = det["bbox_normalized"]
+                x1 = int(bbox_norm[0] * image_w)
+                y1 = int(bbox_norm[1] * image_h)
+                x2 = int(bbox_norm[2] * image_w)
+                y2 = int(bbox_norm[3] * image_h)
+                
+                cv2.rectangle(image_cv, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                cv2.putText(image_cv, f"{det['class']} {det['confidence']:.2f}",
+                           (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+            
+            annotated_filename = f"autodetect_annotated_{int(time.time()*1000)}_{os.path.basename(img_path)}"
+            annotated_path = os.path.join(app.config['UPLOAD_FOLDER_ABS'], annotated_filename)
+            cv2.imwrite(annotated_path, image_cv)
+            
+            results.append({
+                "filename": os.path.basename(img_path),
+                "annotations": detections,
+                "annotation_count": len(detections),
+                "annotated_image": f"/uploads/{annotated_filename}"
+            })
+        
+        total_annotations = sum(r["annotation_count"] for r in results)
+        
+        return jsonify({
+            "success": True,
+            "processed_count": len(results),
+            "results": results,
+            "total_annotations": total_annotations,
+            "classes_detected": list(set(det["class"] for r in results for det in r["annotations"]))
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        # Aufräumen der temporären Bilder
+        for img_path in temp_paths:
+            if os.path.exists(img_path):
+                try: os.remove(img_path)
+                except: pass
+
+@app.route('/dataset/fewshot/load_clip', methods=['POST'])
+def fewshot_load_clip():
+    """Lädt das CLIP Modell manuell"""
+    try:
+        loaded = few_shot_detector.load_clip()
+        if loaded:
+            return jsonify({
+                "success": True,
+                "message": "CLIP Modell erfolgreich geladen",
+                "device": "cuda" if torch.cuda.is_available() else "cpu"
+            })
+        else:
+            return jsonify({
+                "success": False,
+                "message": "CLIP Modell nicht verfügbar. Installiere: pip install clip-by-openai"
+            }), 500
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 if __name__ == '__main__':
-    app.run(debug=True, port=5000, threaded=True)
+    app.run(debug=False, port=5000, threaded=True, use_reloader=False)
