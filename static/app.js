@@ -678,13 +678,25 @@ function log(msg, type = 'info') {
 function showToast(msg, type = 'success') {
     const stack = $('toastStack');
     if (!stack) { console.log(`[${type}] ${msg}`); return; }
+
+    const icons = {
+        success: '✓',
+        error: '✕',
+        warning: '⚠',
+        info: 'ℹ'
+    };
     
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
-    const icon = type === 'success' ? '✓' : type === 'error' ? '✕' : '⚠';
-    toast.innerHTML = `<span style="font-size:18px;">${icon}</span><span>${msg}</span>`;
+    toast.innerHTML = `
+        <span style="font-size:18px;">${icons[type] || icons.success}</span>
+        <span>${msg}</span>
+    `;
     stack.appendChild(toast);
-    setTimeout(() => toast.remove(), 3000);
+    setTimeout(() => {
+        toast.style.animation = 'fadeOut 0.3s ease forwards';
+        setTimeout(() => toast.remove(), 300);
+    }, 3000);
 }
 
 function resetTest() {
@@ -701,8 +713,19 @@ function resetTest() {
 
 function setupKeyboard() {
     document.addEventListener('keydown', e => {
-        if (e.ctrlKey && e.key === 'Enter') { e.preventDefault(); if (!state.processing) runInference(); }
-        if (e.key === 'Escape') resetTest();
+        // Don't trigger when typing in inputs
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+        
+        // Ctrl+Enter: Start inference
+        if (e.ctrlKey && e.key === 'Enter') { 
+            e.preventDefault(); 
+            if (!state.processing) runInference(); 
+        }
+        // Escape: Reset
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            resetTest();
+        }
     });
 }
 

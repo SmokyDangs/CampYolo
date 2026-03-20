@@ -3,39 +3,76 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>YOLO Vision</title>
+    <meta name="description" content="YOLO Vision - Moderne YOLO-Modellverwaltung für Objekterkennung">
+    <meta name="theme-color" content="#6366f1">
+    <title>YOLO Vision 2026</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
     <script src="{{ url_for('static', filename='training.js') }}" defer></script>
     <script src="{{ url_for('static', filename='annotation-editor.js') }}" defer></script>
     <script src="{{ url_for('static', filename='app.js') }}" defer></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
+    <!-- Theme Toggle Button -->
+    <button class="theme-toggle" id="themeToggle" aria-label="Theme umschalten" title="Dark/Light Mode (T)">
+        <svg class="sun-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="display:none;">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path>
+        </svg>
+        <svg class="moon-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path>
+        </svg>
+    </button>
+
     <div class="layout">
-        <aside>
+        <aside role="navigation" aria-label="Hauptnavigation">
             <div class="brand">
                 <div class="brand-badge">Y</div>
-                <span>YOLO</span>
+                <span>YOLO Vision</span>
             </div>
-            <nav>
-                <button class="active" data-target="hub">Modelle</button>
-                <button data-target="testing">Testing</button>
-                <button data-target="dataset" style="position:relative;">
-                    Dataset
-                    <span style="position:absolute; top:-6px; right:-8px; background:linear-gradient(135deg, #f59e0b 0%, #ef4444 100%); color:white; font-size:8px; padding:2px 5px; border-radius:4px; font-weight:700;">SOON</span>
+            <nav role="tablist" aria-label="Hauptbereiche">
+                <button class="active" data-target="hub" role="tab" aria-selected="true">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
+                    Modelle
                 </button>
-                <button data-target="training">Training</button>
-                <button data-target="compare">Vergleich</button>
-                <button data-target="history">Verlauf</button>
-                <button data-target="stats">Statistik</button>
-                <button data-target="settings">Einstellungen</button>
+                <button data-target="testing" role="tab" aria-selected="false">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path></svg>
+                    Testing
+                </button>
+                <button data-target="dataset" role="tab" aria-selected="false">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"></path></svg>
+                    Dataset
+                    <span class="chip" style="margin-left:6px;">NEW</span>
+                </button>
+                <button data-target="training" role="tab" aria-selected="false">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                    Training
+                </button>
+                <button data-target="compare" role="tab" aria-selected="false">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path></svg>
+                    Vergleich
+                </button>
+                <button data-target="history" role="tab" aria-selected="false">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    Verlauf
+                </button>
+                <button data-target="stats" role="tab" aria-selected="false">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+                    Statistik
+                </button>
+                <button data-target="settings" role="tab" aria-selected="false">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                    Einstellungen
+                </button>
             </nav>
             <div style="margin-top:auto;">
-                <div class="pill" id="activeModelPill" style="display:none;">
+                <div class="pill" id="activeModelPill" style="display:none;" aria-live="polite">
                     <span class="dot"></span>
                     <span id="activeModelLabel"></span>
+                </div>
+                <div class="kbd-hint" style="margin-top:12px; opacity:0.6;">
+                    <span class="kbd">?</span> Shortcuts
                 </div>
             </div>
         </aside>
@@ -810,28 +847,61 @@
                 <div class="section-header">
                     <div>
                         <h3>Einstellungen</h3>
-                        <p class="subtitle">Konfiguration</p>
+                        <p class="subtitle">Anwendung konfigurieren</p>
                     </div>
                 </div>
-                <div style="display:grid; gap:12px; max-width:500px;">
-                    <div class="params-panel">
-                        <h4 style="margin:0 0 12px; font-size:13px;">Tastenkürzel</h4>
-                        <div style="display:grid; gap:8px;">
-                            <div style="display:flex; justify-content:space-between; align-items:center; padding:8px; background:var(--bg-secondary); border-radius:6px;">
-                                <span style="font-size:12px;">Inferenz</span>
-                                <kbd style="padding:4px 8px; background:var(--bg-card); border:1px solid var(--border); border-radius:4px; font-family:monospace; font-size:11px;">Strg+Enter</kbd>
+                <div class="settings-grid">
+                    <div class="setting-card">
+                        <h4>
+                            <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01"></path>
+                            </svg>
+                            Erscheinungsbild
+                        </h4>
+                        <div class="setting-item">
+                            <div>
+                                <div class="setting-label">Dark Mode</div>
+                                <div class="setting-desc">Dunkles Design für bessere Augenentlastung</div>
                             </div>
-                            <div style="display:flex; justify-content:space-between; align-items:center; padding:8px; background:var(--bg-secondary); border-radius:6px;">
-                                <span style="font-size:12px;">Reset</span>
-                                <kbd style="padding:4px 8px; background:var(--bg-card); border:1px solid var(--border); border-radius:4px; font-family:monospace; font-size:11px;">Esc</kbd>
-                            </div>
+                            <div class="toggle-switch" id="darkModeToggle" onclick="ThemeManager.toggle()"></div>
                         </div>
                     </div>
-                    <div class="params-panel">
-                        <h4 style="margin:0 0 12px; font-size:13px;">Info</h4>
-                        <div style="color:var(--text-secondary); font-size:12px; line-height:1.6;">
-                            <p style="margin:0 0 6px;"><strong>YOLO Vision</strong> v2.0</p>
-                            <p style="margin:0;">Ultralytics YOLO für Objekterkennung</p>
+                    
+                    <div class="setting-card">
+                        <h4>
+                            <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"></path>
+                            </svg>
+                            Tastenkürzel
+                        </h4>
+                        <div class="setting-item">
+                            <span class="setting-label">Inferenz starten</span>
+                            <div class="shortcut-keys"><kbd>Strg</kbd><kbd>Enter</kbd></div>
+                        </div>
+                        <div class="setting-item">
+                            <span class="setting-label">Abbrechen / Reset</span>
+                            <div class="shortcut-keys"><kbd>Esc</kbd></div>
+                        </div>
+                        <div class="setting-item">
+                            <span class="setting-label">Theme umschalten</span>
+                            <div class="shortcut-keys"><kbd>T</kbd></div>
+                        </div>
+                        <div class="setting-item">
+                            <span class="setting-label">Shortcuts anzeigen</span>
+                            <div class="shortcut-keys"><kbd>?</kbd></div>
+                        </div>
+                    </div>
+                    
+                    <div class="setting-card">
+                        <h4>
+                            <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                            Über YOLO Vision
+                        </h4>
+                        <div style="color:var(--text-secondary); font-size:13px; line-height:1.8;">
+                            <p style="margin:0 0 8px;"><strong>YOLO Vision 2026</strong> v2.0</p>
+                            <p style="margin:0; opacity:0.8;">Moderne Weboberfläche für Ultralytics YOLO-Objekterkennung mit Few-Shot Auto-Detection und Dataset-Editor.</p>
                         </div>
                     </div>
                 </div>
@@ -839,10 +909,113 @@
         </main>
     </div>
 
-    <div id="toastStack" class="toast-stack"></div>
+    <div id="toastStack" class="toast-stack" role="alert" aria-live="assertive"></div>
+
+    <!-- Keyboard Shortcuts Modal -->
+    <div id="shortcutsModal" class="modal-overlay" style="display:none;" onclick="if(event.target===this) toggleShortcutsModal()">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="shortcutsTitle">
+            <div class="modal-header">
+                <h3 id="shortcutsTitle" class="modal-title">⌨️ Tastenkürzel</h3>
+                <button class="modal-close" onclick="toggleShortcutsModal()" aria-label="Schließen">✕</button>
+            </div>
+            <div class="shortcut-list">
+                <div class="shortcut-item">
+                    <span class="shortcut-action">Inferenz starten</span>
+                    <div class="shortcut-keys"><kbd>Strg</kbd><kbd>Enter</kbd></div>
+                </div>
+                <div class="shortcut-item">
+                    <span class="shortcut-action">Abbrechen / Reset</span>
+                    <div class="shortcut-keys"><kbd>Esc</kbd></div>
+                </div>
+                <div class="shortcut-item">
+                    <span class="shortcut-action">Theme umschalten</span>
+                    <div class="shortcut-keys"><kbd>T</kbd></div>
+                </div>
+                <div class="shortcut-item">
+                    <span class="shortcut-action">Shortcuts anzeigen</span>
+                    <div class="shortcut-keys"><kbd>?</kbd></div>
+                </div>
+                <div class="shortcut-item">
+                    <span class="shortcut-action">Modell neu laden</span>
+                    <div class="shortcut-keys"><kbd>F5</kbd></div>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <script>
+        // Theme Management
+        const ThemeManager = {
+            init() {
+                const saved = localStorage.getItem('yolo_theme') || 'dark';
+                this.set(saved);
+                this.setupToggle();
+            },
+            set(theme) {
+                document.documentElement.setAttribute('data-theme', theme);
+                this.updateIcons(theme);
+                this.updateToggle(theme);
+                localStorage.setItem('yolo_theme', theme);
+            },
+            toggle() {
+                const current = document.documentElement.getAttribute('data-theme');
+                this.set(current === 'dark' ? 'light' : 'dark');
+                showToast(`Theme zu ${current === 'dark' ? 'Light' : 'Dark'} gewechselt`, 'info');
+            },
+            updateIcons(theme) {
+                const sunIcon = document.querySelector('.sun-icon');
+                const moonIcon = document.querySelector('.moon-icon');
+                if (theme === 'dark') {
+                    sunIcon.style.display = 'none';
+                    moonIcon.style.display = 'block';
+                } else {
+                    sunIcon.style.display = 'block';
+                    moonIcon.style.display = 'none';
+                }
+            },
+            updateToggle(theme) {
+                const toggle = document.getElementById('darkModeToggle');
+                if (toggle) {
+                    toggle.classList.toggle('active', theme === 'dark');
+                }
+            },
+            setupToggle() {
+                document.getElementById('themeToggle')?.addEventListener('click', () => this.toggle());
+            }
+        };
+
+        // Keyboard Shortcuts
+        const ShortcutsManager = {
+            init() {
+                document.addEventListener('keydown', (e) => this.handle(e));
+            },
+            handle(e) {
+                // Don't trigger when typing in inputs
+                if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+                
+                // Theme toggle: T
+                if (e.key === 't' || e.key === 'T') {
+                    e.preventDefault();
+                    ThemeManager.toggle();
+                }
+                // Shortcuts modal: ?
+                if (e.key === '?' || (e.shiftKey && e.key === '/')) {
+                    e.preventDefault();
+                    toggleShortcutsModal();
+                }
+            }
+        };
+
+        function toggleShortcutsModal() {
+            const modal = document.getElementById('shortcutsModal');
+            modal.style.display = modal.style.display === 'none' ? 'flex' : 'none';
+        }
+
+        // Initialize on load
         document.addEventListener('DOMContentLoaded', () => {
+            ThemeManager.init();
+            ShortcutsManager.init();
+            
             document.getElementById('confValue').textContent = document.getElementById('confThreshold').value;
             document.getElementById('iouValue').textContent = document.getElementById('iouThreshold').value;
             document.getElementById('sizeValue').textContent = document.getElementById('imgSize').value;

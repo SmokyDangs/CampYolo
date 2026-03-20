@@ -1,4 +1,4 @@
-import os, gc, time, shutil, json, io, base64, re, subprocess, csv, numpy as np
+import os, gc, time, shutil, json, io, base64, re, subprocess, csv, numpy as np, logging, sys, traceback
 from pathlib import Path
 from datetime import datetime
 from collections import deque
@@ -6,6 +6,63 @@ import torch, cv2, mimetypes
 from flask import Flask, render_template, request, jsonify, send_from_directory, send_file, Response, stream_with_context
 from ultralytics import YOLO
 
+# ==================== LOGGING KONFIGURATION ====================
+LOG_DIR = 'logs'
+os.makedirs(LOG_DIR, exist_ok=True)
+
+# Log-Format: Zeitstempel, Level, Modul, Funktion, Zeile, Nachricht
+LOG_FORMAT = '%(asctime)s | %(levelname)-8s | %(name)s | %(funcName)s:%(lineno)d | %(message)s'
+DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
+
+# Console Handler mit Farben
+class ColorFormatter(logging.Formatter):
+    COLORS = {
+        'DEBUG': '\033[36m',     # Cyan
+        'INFO': '\033[32m',      # Grün
+        'WARNING': '\033[33m',   # Gelb
+        'ERROR': '\033[31m',     # Rot
+        'CRITICAL': '\033[35m',  # Magenta
+    }
+    RESET = '\033[0m'
+    
+    def format(self, record):
+        color = self.COLORS.get(record.levelname, self.RESET)
+        record.levelname = f"{color}{record.levelname}{self.RESET}"
+        return super().format(record)
+
+console_handler = logging.StreamHandler(sys.stdout)
+console_handler.setLevel(logging.DEBUG)
+console_handler.setFormatter(ColorFormatter(LOG_FORMAT, datefmt=DATE_FORMAT))
+
+# File Handler für persistente Logs
+timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+file_handler = logging.FileHandler(f'{LOG_DIR}/app_{timestamp}.log', encoding='utf-8')
+file_handler.setLevel(logging.DEBUG)
+file_handler.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=DATE_FORMAT))
+
+# Error File Handler nur für Fehler
+error_handler = logging.FileHandler(f'{LOG_DIR}/errors.log', encoding='utf-8', mode='a')
+error_handler.setLevel(logging.ERROR)
+error_handler.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=DATE_FORMAT))
+
+# Root Logger konfigurieren
+logging.basicConfig(
+    level=logging.DEBUG,
+    handlers=[console_handler, file_handler, error_handler]
+)
+logger = logging.getLogger('CampYolo')
+
+# Flask Logger konfigurieren
+flask_logger = logging.getLogger('werkzeug')
+flask_logger.setLevel(logging.DEBUG)
+flask_logger.handlers = [console_handler, file_handler]
+
+# Ultralytics Logger konfigurieren
+ultralytics_logger = logging.getLogger('ultralytics')
+ultralytics_logger.setLevel(logging.WARNING)
+ultralytics_logger.handlers = [console_handler, file_handler]
+
+# ==================== FLASK APP ====================
 app = Flask(__name__)
 app.config['MODEL_DIR'] = 'models'
 app.config['UPLOAD_FOLDER'] = 'uploads'
@@ -15,11 +72,94 @@ MAX_VIDEO_MB = 150
 MAX_VIDEO_DURATION_S = 60
 torch.set_grad_enabled(False)
 
+logger.info("=" * 80)
+logger.info("CampYolo Anwendung wird gestartet...")
+logger.info(f"Python Version: {sys.version}")
+logger.info(f"PyTorch Version: {torch.__version__}")
+logger.info(f"CUDA verfügbar: {torch.cuda.is_available()}")
+if torch.cuda.is_available():
+    logger.info(f"CUDA Version: {torch.version.cuda}")
+    logger.info(f"GPU Anzahl: {torch.cuda.device_count()}")
+    for i in range(torch.cuda.device_count()):
+        logger.info(f"  GPU {i}: {torch.cuda.get_device_name(i)}")
+logger.info(f"OpenCV Version: {cv2.__version__}")
+logger.info("=" * 80)
+
 active_model = {"name": None, "instance": None}
 results_history = deque(maxlen=100)
 
 os.makedirs(app.config['MODEL_DIR'], exist_ok=True)
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+
+# Debug-Informationen für aktive Requests
+request_logger = logging.getLogger('requests')
+request_logger.setLevel(logging.DEBUG)
+request_logger.addHandler(console_handler)
+request_logger.addHandler(file_handler)
+
+# ==================== REQUEST LOGGING MIDDLEWARE ====================
+@app.before_request
+def before_request():
+    """Wird vor jedem Request aufgerufen"""
+    request.start_time = time.time()
+    request_logger.debug(f"▶▶▶ {request.method} {request.path} | IP: {request.remote_addr}")
+    if request.args:
+        request_logger.debug(f"    Query-Params: {dict(request.args)}")
+    if request.form:
+        request_logger.debug(f"    Form-Daten: {dict(request.form)}")
+    if request.files:
+        for file in request.files.values():
+            if file and file.filename:
+                request_logger.debug(f"    Datei: {file.filename} ({getattr(file, 'content_length', 'unknown')} bytes)")
+
+@app.after_request
+def after_request(response):
+    """Wird nach jedem Request aufgerufen"""
+    if hasattr(request, 'start_time'):
+        duration = time.time() - request.start_time
+        status_color = '\033[32m' if response.status_code < 400 else '\033[31m'
+        reset = '\033[0m'
+        request_logger.info(f"◀◀◀ {request.method} {request.path} | Status: {status_color}{response.status_code}{reset} | Dauer: {duration*1000:.2f}ms")
+    return response
+
+@app.errorhandler(Exception)
+def handle_exception(e):
+    """Globaler Exception-Handler für detailliertes Error-Logging"""
+    error_id = datetime.now().strftime('%Y%m%d%H%M%S%f')
+    tb = traceback.format_exc()
+    logger.error(f"❗ UNBEHANDELTER FEHLER [{error_id}]: {str(e)}")
+    logger.error(f"Stacktrace:\n{tb}")
+    
+    # JSON Response für API-Endpunkte
+    if request.path.startswith('/api/') or request.is_json or 'json' in request.headers.get('Accept', ''):
+        return jsonify({
+            "error": "Interner Serverfehler",
+            "error_id": error_id,
+            "message": str(e) if app.debug else "Ein unerwarteter Fehler ist aufgetreten"
+        }), 500
+    
+    # HTML Response für Browser
+    return render_template('error.html', error=e, error_id=error_id, traceback=tb if app.debug else None), 500
+
+# ==================== HELPER FUNKTIONEN FÜR LOGGING ====================
+def log_gpu_stats():
+    """Loggt aktuelle GPU-Statistiken"""
+    if torch.cuda.is_available():
+        logger.debug(f"GPU Speicher: {torch.cuda.memory_allocated() / 1024**2:.2f} MB allokiert, {torch.cuda.memory_reserved() / 1024**2:.2f} MB reserviert")
+    else:
+        logger.debug("GPU nicht verfügbar - CPU-Modus aktiv")
+
+def log_model_info(model_name, model_instance):
+    """Loggt Modell-Informationen"""
+    if model_instance:
+        logger.info(f"Modell '{model_name}' geladen")
+        # Modell-Parameter zählen
+        total_params = sum(p.numel() for p in model_instance.model.parameters())
+        logger.debug(f"Modell-Parameter: {total_params:,} ({total_params/1e6:.2f}M)")
+    else:
+        logger.warning(f"Modell '{model_name}' konnte nicht geladen werden")
+
+# ==================== MODEL LOADING MIT LOGGING ====================
 
 def extract_results_data(results):
     all_detections, last_save_dir = [], None
@@ -257,21 +397,51 @@ def suggest_model():
 
 @app.route('/load/<model_name>', methods=['POST'])
 def load_model(model_name):
+    """Lädt ein YOLO-Modell mit detailliertem Logging"""
     global active_model
+    start_time = time.time()
+    
+    logger.info(f"📦 Modell-Laden angefordert: '{model_name}'")
     path = os.path.join(app.config['MODEL_DIR'], model_name)
-    if not os.path.exists(path): return jsonify({"error": "Modell nicht gefunden"}), 404
+    
+    # Prüfen ob Datei existiert
+    if not os.path.exists(path):
+        logger.error(f"❌ Modell-Datei nicht gefunden: {path}")
+        return jsonify({"error": "Modell nicht gefunden"}), 404
+    
+    logger.debug(f"✅ Modell-Datei existiert: {path} ({os.path.getsize(path) / 1024**2:.2f} MB)")
+    
     try:
+        # Vorheriges Modell entladen
         if active_model["instance"]:
-            print(f"Entlade: {active_model['name']}")
+            logger.info(f"🔄 Vorheriges Modell wird entladen: {active_model['name']}")
             active_model["instance"] = None
             active_model["name"] = None
             gc.collect()
-            if torch.cuda.is_available(): torch.cuda.empty_cache()
-        print(f"Lade: {model_name}")
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                logger.debug("GPU-Cache geleert")
+        
+        # Neues Modell laden
+        logger.info(f"⏳ Lade Modell '{model_name}'...")
+        log_gpu_stats()
+        
         active_model["instance"] = YOLO(path)
         active_model["name"] = model_name
+        
+        load_duration = time.time() - start_time
+        logger.info(f"✅ Modell '{model_name}' erfolgreich geladen in {load_duration:.2f}s")
+        log_model_info(model_name, active_model["instance"])
+        log_gpu_stats()
+        
         return jsonify({"status": f"Modell {model_name} aktiv", "active_model": model_name})
-    except Exception as e: return jsonify({"error": str(e)}), 500
+    
+    except Exception as e:
+        logger.error(f"❌ Fehler beim Laden von '{model_name}': {str(e)}")
+        logger.error(f"Stacktrace:\n{traceback.format_exc()}")
+        active_model["instance"] = None
+        active_model["name"] = None
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/test', methods=['POST'])
 def test_model():
@@ -301,8 +471,13 @@ def test_model():
         elif source_type == 'screenshot': inference_source = 'screen'
         else: return jsonify({"error": f"Ungültige Quelle: {source_type}"}), 400
         stream_mode = source_type in {'video', 'url', 'webcam', 'directory', 'glob', 'stream'}
+        # CPU-Modus für Webcam und Streams bei alter CUDA-Architektur
+        device_override = 'cpu' if source_type in {'webcam', 'stream'} else None
         with torch.inference_mode():
-            results_gen = active_model["instance"](inference_source, conf=conf, iou=iou, imgsz=imgsz, save=save, show=False, stream=stream_mode, verbose=False)
+            if device_override:
+                results_gen = active_model["instance"](inference_source, conf=conf, iou=iou, imgsz=imgsz, save=save, show=False, stream=stream_mode, verbose=False, device=device_override)
+            else:
+                results_gen = active_model["instance"](inference_source, conf=conf, iou=iou, imgsz=imgsz, save=save, show=False, stream=stream_mode, verbose=False)
         all_detections, last_save_dir = [], None
         for r in results_gen:
             det, save_dir = extract_results_data([r])
@@ -505,29 +680,125 @@ def validate_video(path: str, max_mb: int, max_duration_s: int) -> str | None:
 
 @app.route('/test_webcam', methods=['GET', 'POST'])
 def test_webcam():
-    if not active_model["instance"]: return jsonify({"error": "Kein Modell geladen"}), 400
+    """Webcam-Stream mit detailliertem Logging"""
+    start_time = time.time()
+    
+    # Prüfen ob Modell geladen ist
+    if not active_model["instance"]:
+        logger.error("❌ Webcam-Anfrage ohne geladenes Modell")
+        return jsonify({"error": "Kein Modell geladen"}), 400
+    
+    # Parameter parsen
     cam_id = request.values.get('cam_id', '0')
-    try: cam_id = int(cam_id)
-    except ValueError: return jsonify({"error": "Ungültige Webcam-ID"}), 400
-    conf, imgsz = float(request.values.get('conf', 0.25)), int(request.values.get('imgsz', 640))
-    cap = cv2.VideoCapture(cam_id)
-    if not cap.isOpened(): return jsonify({"error": f"Webcam {cam_id} nicht verfügbar"}), 404
-    cap.release()
-    def generate():
+    try:
+        cam_id = int(cam_id)
+    except ValueError:
+        logger.error(f"❌ Ungültige Webcam-ID: {cam_id}")
+        return jsonify({"error": "Ungültige Webcam-ID"}), 400
+    
+    conf = float(request.values.get('conf', 0.25))
+    imgsz = int(request.values.get('imgsz', 640))
+    
+    logger.info(f"📷 Webcam-Stream angefordert: ID={cam_id}, conf={conf}, imgsz={imgsz}")
+    
+    # Webcam Verfügbarkeit prüfen
+    try:
         cap = cv2.VideoCapture(cam_id)
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640); cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        if not cap.isOpened():
+            logger.error(f"❌ Webcam {cam_id} nicht verfügbar")
+            return jsonify({"error": f"Webcam {cam_id} nicht verfügbar"}), 404
+        
+        # Kamera-Eigenschaften auslesen
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        logger.info(f"✅ Webcam {cam_id} geöffnet: {width}x{height} @ {fps:.1f} FPS")
+        cap.release()
+    except Exception as e:
+        logger.error(f"❌ Fehler beim Öffnen der Webcam: {str(e)}")
+        logger.error(f"Stacktrace:\n{traceback.format_exc()}")
+        return jsonify({"error": f"Webcam-Fehler: {str(e)}"}), 500
+    
+    def generate():
+        """Generator-Funktion für MJPEG-Stream"""
         frame_count, max_frames = 0, 300
+        inference_times = []
+        cap = None
+        
         try:
+            logger.debug(f"🎬 Starte Webcam-Stream für Kamera {cam_id}")
+            cap = cv2.VideoCapture(cam_id)
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            
+            # Erste Frame für Warmup
+            ret, frame = cap.read()
+            if ret:
+                logger.debug("🔥 Warmup-Inferenz für ersten Frame...")
+                try:
+                    with torch.inference_mode():
+                        _ = active_model["instance"](frame, conf=conf, imgsz=imgsz, verbose=False, device='cpu')
+                    logger.debug("✅ Warmup abgeschlossen")
+                except Exception as e:
+                    logger.warning(f"⚠️ Warmup fehlgeschlagen: {str(e)}")
+            
             while cap.isOpened() and frame_count < max_frames:
+                frame_start = time.time()
                 ret, frame = cap.read()
-                if not ret: break
-                with torch.inference_mode(): results = active_model["instance"](frame, conf=conf, imgsz=imgsz, verbose=False)
-                annotated = results[0].plot()
-                _, buffer = cv2.imencode('.jpg', annotated)
-                yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
-                frame_count += 1
-        finally: cap.release()
-    return Response(stream_with_context(generate()), mimetype='multipart/x-mixed-replace; boundary=frame', headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+                
+                if not ret:
+                    logger.warning(f"⚠️ Frame {frame_count}: Keine Frame gelesen, breche ab")
+                    break
+                
+                # Inferenz
+                try:
+                    with torch.inference_mode():
+                        # CPU-Modus erzwingen für GPUs mit alter CUDA-Architektur
+                        results = active_model["instance"](frame, conf=conf, imgsz=imgsz, verbose=False, device='cpu')
+                    
+                    inference_time = time.time() - frame_start
+                    inference_times.append(inference_time)
+                    
+                    # Annotation
+                    annotated = results[0].plot()
+                    
+                    # Encode als JPEG
+                    _, buffer = cv2.imencode('.jpg', annotated, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                    
+                    # Log alle 30 Frames
+                    if frame_count % 30 == 0:
+                        avg_inference = sum(inference_times[-30:]) / min(len(inference_times), 30)
+                        logger.debug(f"📊 Frame {frame_count}: {inference_time*1000:.1f}ms (Ø: {avg_inference*1000:.1f}ms)")
+                    
+                    yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
+                    frame_count += 1
+                    
+                except Exception as e:
+                    logger.error(f"❌ Inferenz-Fehler bei Frame {frame_count}: {str(e)}")
+                    logger.error(f"Stacktrace:\n{traceback.format_exc()}")
+                    # Sende Fehlerbild
+                    error_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+                    cv2.putText(error_frame, f"Error: {str(e)[:50]}", (10, 240), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                    _, buffer = cv2.imencode('.jpg', error_frame)
+                    yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
+                    frame_count += 1
+            
+            total_time = time.time() - start_time
+            avg_fps = frame_count / total_time if total_time > 0 else 0
+            logger.info(f"✅ Webcam-Stream beendet: {frame_count} Frames in {total_time:.1f}s (Ø {avg_fps:.1f} FPS)")
+            
+        except Exception as e:
+            logger.error(f"❗ Unerwarteter Fehler im Webcam-Stream: {str(e)}")
+            logger.error(f"Stacktrace:\n{traceback.format_exc()}")
+        finally:
+            if cap:
+                cap.release()
+                logger.debug("📷 Webcam geschlossen")
+    
+    return Response(stream_with_context(generate()), 
+                   mimetype='multipart/x-mixed-replace; boundary=frame', 
+                   headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 @app.route('/test_stream', methods=['POST'])
 def test_stream():
@@ -546,7 +817,8 @@ def test_stream():
             while cap.isOpened() and frame_count < max_frames:
                 ret, frame = cap.read()
                 if not ret: time.sleep(1); cap.open(stream_url); continue
-                results = active_model["instance"](frame, conf=conf, imgsz=imgsz, verbose=False)
+                with torch.inference_mode():
+                    results = active_model["instance"](frame, conf=conf, imgsz=imgsz, verbose=False, device='cpu')
                 annotated = results[0].plot()
                 _, buffer = cv2.imencode('.jpg', annotated)
                 yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
@@ -1581,5 +1853,140 @@ def fewshot_load_clip():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# ==================== DEBUG & LOGGING ENDPOINTS ====================
+@app.route('/debug/info', methods=['GET'])
+def debug_info():
+    """Zeigt detaillierte System- und Anwendungsinformationen"""
+    import platform
+    
+    gpu_info = []
+    if torch.cuda.is_available():
+        for i in range(torch.cuda.device_count()):
+            gpu_info.append({
+                "name": torch.cuda.get_device_name(i),
+                "cuda_capability": torch.cuda.get_device_capability(i),
+                "memory_allocated_mb": round(torch.cuda.memory_allocated(i) / 1024**2, 2),
+                "memory_reserved_mb": round(torch.cuda.memory_reserved(i) / 1024**2, 2)
+            })
+    
+    model_files = []
+    for f in os.listdir(app.config['MODEL_DIR']):
+        if f.endswith('.pt'):
+            path = os.path.join(app.config['MODEL_DIR'], f)
+            model_files.append({
+                "name": f,
+                "size_mb": round(os.path.getsize(path) / 1024**2, 2),
+                "modified": datetime.fromtimestamp(os.path.getmtime(path)).isoformat()
+            })
+    
+    return jsonify({
+        "timestamp": datetime.now().isoformat(),
+        "system": {
+            "platform": platform.platform(),
+            "python_version": sys.version,
+            "processor": platform.processor()
+        },
+        "libraries": {
+            "torch": torch.__version__,
+            "opencv": cv2.__version__,
+            "numpy": np.__version__,
+            "flask": flask.__version__ if 'flask' in dir() else "unknown"
+        },
+        "cuda": {
+            "available": torch.cuda.is_available(),
+            "version": torch.version.cuda if torch.cuda.is_available() else None,
+            "gpus": gpu_info
+        },
+        "models": {
+            "directory": app.config['MODEL_DIR'],
+            "files": model_files,
+            "active": active_model["name"]
+        },
+        "config": {
+            "upload_folder": app.config['UPLOAD_FOLDER'],
+            "max_content_length_mb": app.config['MAX_CONTENT_LENGTH'] / 1024**2,
+            "max_video_mb": MAX_VIDEO_MB,
+            "max_video_duration_s": MAX_VIDEO_DURATION_S
+        },
+        "history": {
+            "entries_count": len(results_history)
+        }
+    })
+
+@app.route('/debug/logs', methods=['GET'])
+def debug_logs():
+    """Zeigt die letzten Log-Einträge"""
+    lines = request.args.get('lines', 100)
+    log_type = request.args.get('type', 'app')  # 'app' oder 'error'
+    
+    try:
+        lines = int(lines)
+    except ValueError:
+        lines = 100
+    
+    log_files = []
+    if log_type == 'error':
+        log_files = [f'{LOG_DIR}/errors.log']
+    else:
+        # Hole die neueste app log datei
+        try:
+            app_logs = sorted([f for f in os.listdir(LOG_DIR) if f.startswith('app_') and f.endswith('.log')], reverse=True)
+            if app_logs:
+                log_files = [f'{LOG_DIR}/{app_logs[0]}']
+        except:
+            pass
+    
+    log_content = []
+    for log_file in log_files:
+        if os.path.exists(log_file):
+            try:
+                with open(log_file, 'r', encoding='utf-8') as f:
+                    all_lines = f.readlines()
+                    log_content.extend(all_lines[-lines:])
+            except Exception as e:
+                log_content.append(f"Error reading log file: {str(e)}\n")
+    
+    return Response(''.join(log_content), mimetype='text/plain')
+
+@app.route('/debug/health', methods=['GET'])
+def debug_health():
+    """Health-Check Endpoint"""
+    health_status = {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "checks": {
+            "model_loaded": active_model["instance"] is not None,
+            "active_model": active_model["name"],
+            "cuda_available": torch.cuda.is_available(),
+            "upload_folder_exists": os.path.exists(app.config['UPLOAD_FOLDER']),
+            "model_folder_exists": os.path.exists(app.config['MODEL_DIR'])
+        }
+    }
+    
+    # Prüfe ob Upload-Ordner beschreibbar ist
+    try:
+        test_file = os.path.join(app.config['UPLOAD_FOLDER'], '.health_check')
+        with open(test_file, 'w') as f:
+            f.write('test')
+        os.remove(test_file)
+        health_status["checks"]["upload_folder_writable"] = True
+    except:
+        health_status["checks"]["upload_folder_writable"] = False
+        health_status["status"] = "degraded"
+    
+    # Bestimme Gesamtstatus
+    if not health_status["checks"]["upload_folder_exists"] or not health_status["checks"]["model_folder_exists"]:
+        health_status["status"] = "unhealthy"
+    
+    status_code = 200 if health_status["status"] == "healthy" else (503 if health_status["status"] == "unhealthy" else 200)
+    return jsonify(health_status), status_code
+
+# ==================== MAIN ====================
 if __name__ == '__main__':
+    logger.info("🚀 Starte Flask-Server auf http://127.0.0.1:5000")
+    logger.info(f"📁 Logs werden gespeichert in: {os.path.abspath(LOG_DIR)}")
+    logger.info("🔧 Debug-Endpoints verfügbar:")
+    logger.info("   - GET /debug/info    : System-Informationen")
+    logger.info("   - GET /debug/logs    : Log-Datei-Inhalt")
+    logger.info("   - GET /debug/health  : Health-Check")
     app.run(debug=False, port=5000, threaded=True, use_reloader=False)
