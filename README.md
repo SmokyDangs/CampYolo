@@ -23,14 +23,14 @@ Ein schlanker Flask-Server mit Web-UI zum Verwalten und Testen von Ultralytics Y
 - **History & Export:** Letzte Ergebnisse mit Detections, CSV/JSON/summary-Export.
 
 ## Schnellstart
-1. Abhängigkeiten installieren (Python 3.10+):
+1. Abhängigkeiten installieren (optional, wird auch automatisch geprüft):
    ```bash
    pip install -r requirements.txt
    ```
 2. Modelle (.pt) in `models/` legen.
-3. Server starten:
+3. Server starten (richtet automatisch CUDA ein):
    ```bash
-   python app.py
+   python run.py
    ```
 4. Browser öffnen: `http://127.0.0.1:5000`
 

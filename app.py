@@ -85,6 +85,32 @@ if torch.cuda.is_available():
 logger.info(f"OpenCV Version: {cv2.__version__}")
 logger.info("=" * 80)
 
+# ==================== GERÄTE-KONFIGURATION ====================
+DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+def verify_cuda_capability():
+    """Prüft, ob die installierte PyTorch-Version mit der GPU-Architektur kompatibel ist."""
+    global DEVICE
+    if DEVICE == 'cuda':
+        try:
+            # Test-Inferenz auf der GPU
+            test_tensor = torch.zeros((1, 3, 64, 64)).to(DEVICE)
+            # Eine kleine Operation ausführen
+            _ = test_tensor + 1
+            logger.info("✅ GPU-Kompatibilitätstest erfolgreich.")
+        except RuntimeError as e:
+            if "no kernel image is available" in str(e).lower() or "arch" in str(e).lower():
+                logger.error("❌ GPU-Architektur nicht kompatibel mit installierter PyTorch-Version!")
+                logger.error(f"Fehler: {str(e)}")
+                logger.warning("⚠️ Schalte automatisch auf CPU-Modus um...")
+                DEVICE = 'cpu'
+            else:
+                logger.error(f"❌ Unerwarteter CUDA-Fehler: {str(e)}")
+                DEVICE = 'cpu'
+    
+verify_cuda_capability()
+logger.info(f"Verwende Gerät: {DEVICE}")
+
 active_model = {"name": None, "instance": None}
 results_history = deque(maxlen=100)
 
@@ -471,13 +497,10 @@ def test_model():
         elif source_type == 'screenshot': inference_source = 'screen'
         else: return jsonify({"error": f"Ungültige Quelle: {source_type}"}), 400
         stream_mode = source_type in {'video', 'url', 'webcam', 'directory', 'glob', 'stream'}
-        # CPU-Modus für Webcam und Streams bei alter CUDA-Architektur
-        device_override = 'cpu' if source_type in {'webcam', 'stream'} else None
+        # Nutze globales DEVICE (CUDA falls verfügbar)
+        device_override = DEVICE if source_type in {'webcam', 'stream'} else DEVICE
         with torch.inference_mode():
-            if device_override:
-                results_gen = active_model["instance"](inference_source, conf=conf, iou=iou, imgsz=imgsz, save=save, show=False, stream=stream_mode, verbose=False, device=device_override)
-            else:
-                results_gen = active_model["instance"](inference_source, conf=conf, iou=iou, imgsz=imgsz, save=save, show=False, stream=stream_mode, verbose=False)
+            results_gen = active_model["instance"](inference_source, conf=conf, iou=iou, imgsz=imgsz, save=save, show=False, stream=stream_mode, verbose=False, device=device_override)
         all_detections, last_save_dir = [], None
         for r in results_gen:
             det, save_dir = extract_results_data([r])
@@ -737,7 +760,7 @@ def test_webcam():
                 logger.debug("🔥 Warmup-Inferenz für ersten Frame...")
                 try:
                     with torch.inference_mode():
-                        _ = active_model["instance"](frame, conf=conf, imgsz=imgsz, verbose=False, device='cpu')
+                        _ = active_model["instance"](frame, conf=conf, imgsz=imgsz, verbose=False, device=DEVICE)
                     logger.debug("✅ Warmup abgeschlossen")
                 except Exception as e:
                     logger.warning(f"⚠️ Warmup fehlgeschlagen: {str(e)}")
@@ -754,7 +777,7 @@ def test_webcam():
                 try:
                     with torch.inference_mode():
                         # CPU-Modus erzwingen für GPUs mit alter CUDA-Architektur
-                        results = active_model["instance"](frame, conf=conf, imgsz=imgsz, verbose=False, device='cpu')
+                        results = active_model["instance"](frame, conf=conf, imgsz=imgsz, verbose=False, device=DEVICE)
                     
                     inference_time = time.time() - frame_start
                     inference_times.append(inference_time)
@@ -818,7 +841,7 @@ def test_stream():
                 ret, frame = cap.read()
                 if not ret: time.sleep(1); cap.open(stream_url); continue
                 with torch.inference_mode():
-                    results = active_model["instance"](frame, conf=conf, imgsz=imgsz, verbose=False, device='cpu')
+                    results = active_model["instance"](frame, conf=conf, imgsz=imgsz, verbose=False, device=DEVICE)
                 annotated = results[0].plot()
                 _, buffer = cv2.imencode('.jpg', annotated)
                 yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
@@ -1617,14 +1640,29 @@ def training_start():
             
             training_job["logs"].append({"type": "info", "message": f"Starte Training: {epochs} Epochen, Batch={batch}, imgsz={imgsz}"})
             
-            # Callback für Training-Fortschritt
-            def on_epoch(epoch_info):
-                epoch = epoch_info.get('epoch', 0)
-                metrics = epoch_info.get('metrics', {})
+            # Callback für Training-Fortschritt (Ultralytics-konform)
+            def on_train_epoch_end(trainer):
+                if not training_job["active"]:
+                    trainer.stop = True
+                    return
+                
+                epoch = trainer.epoch + 1  # 0-basiert
+                metrics = trainer.metrics
+                map50 = metrics.get('metrics/mAP50(B)', metrics.get('metrics/mAP50', 0))
+                loss = metrics.get('train/box_loss', metrics.get('loss', 0))
+                
                 training_job["logs"].append({
                     "type": "info",
-                    "message": f"Epoch {epoch}/{epochs}: mAP50={metrics.get('metrics/mAP50', 0):.4f}, Loss={metrics.get('train/box_loss', 0):.4f}"
+                    "message": f"Epoch {epoch}/{epochs}: mAP50={map50:.4f}, Loss={loss:.4f}"
                 })
+            
+            def on_train_batch_end(trainer):
+                if not training_job["active"]:
+                    trainer.stop = True
+            
+            # Callbacks hinzufügen
+            model.add_callback("on_train_epoch_end", on_train_epoch_end)
+            model.add_callback("on_train_batch_end", on_train_batch_end)
             
             # Training starten
             results = model.train(
@@ -1636,17 +1674,17 @@ def training_start():
                 name=f"training_{int(time.time())}",
                 exist_ok=True,
                 verbose=False,
-                callbacks={"on_epoch": on_epoch}
+                device=DEVICE
             )
             
             # Ergebnisse speichern
             training_job["results"] = {
-                "map50": float(results.results_dict.get('metrics/mAP50', 0)),
-                "map95": float(results.results_dict.get('metrics/mAP50-95', 0)),
+                "map50": float(results.results_dict.get('metrics/mAP50(B)', results.results_dict.get('metrics/mAP50', 0))),
+                "map95": float(results.results_dict.get('metrics/mAP50-95(B)', results.results_dict.get('metrics/mAP50-95', 0))),
                 "epochs": epochs,
-                "best_epoch": int(results.results_dict.get('epoch', 0)),
+                "best_epoch": int(results.results_dict.get('epoch', epochs)),
                 "training_time": time.time() - start_time,
-                "model_path": str(results.save_dir / 'best.pt')
+                "model_path": str(Path(results.save_dir) / 'weights' / 'best.pt')
             }
             
             training_job["logs"].append({"type": "success", "message": f"Training abgeschlossen! mAP50: {training_job['results']['map50']:.4f}"})
