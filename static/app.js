@@ -36,6 +36,9 @@ document.addEventListener('DOMContentLoaded', () => {
         urlInput: $('urlInput'),
         streamUrlInput: $('streamUrlInput'),
         webcamIdInput: $('webcamIdInput'),
+        directoryInput: $('directoryInput'),
+        directoryDropPrompt: $('directoryDropPrompt'),
+        localPathInput: $('localPathInput'),
         confThreshold: $('confThreshold'),
         iouThreshold: $('iouThreshold'),
         imgSize: $('imgSize'),
@@ -75,6 +78,7 @@ function setupInputs() {
     els.imageInput?.addEventListener('change', handleFileSelect);
     els.videoInput?.addEventListener('change', handleFileSelect);
     els.batchInput?.addEventListener('change', handleBatchSelect);
+    els.directoryInput?.addEventListener('change', handleDirectorySelect);
     
     ['confThreshold', 'iouThreshold', 'imgSize'].forEach(id => {
         $(id)?.addEventListener('input', setupParamLabels);
@@ -93,17 +97,28 @@ function setupParamLabels() {
 function setupDropzones() {
     setupDropzone(els.dropzone, () => state.mode === 'video' ? els.videoInput : els.imageInput);
     setupDropzone(els.batchDropzone, () => els.batchInput, true);
+    setupDropzone($('directoryDropzone'), () => els.directoryInput);
 }
 
 function setupDropzone(dz, getInput, isBatch = false) {
     if (!dz) return;
     
-    const clickHandler = (e) => {
-        e.preventDefault();
-        getInput()?.click();
-    };
-    
-    dz.addEventListener('click', clickHandler);
+    // Dropzone-Klick triggert das versteckte Input
+    dz.addEventListener('click', (e) => {
+        // Wenn der Klick bereits vom Input kam (Bubbling), nichts tun
+        if (e.target.tagName === 'INPUT') return;
+        
+        const input = getInput();
+        if (input) {
+            input.click();
+        }
+    });
+
+    // Bubbling vom Input unterbinden, um Rekursion zu vermeiden
+    const inputs = dz.querySelectorAll('input[type="file"]');
+    inputs.forEach(input => {
+        input.addEventListener('click', (e) => e.stopPropagation());
+    });
     
     ['dragenter', 'dragover'].forEach(evt => {
         dz.addEventListener(evt, e => {
@@ -162,6 +177,8 @@ function setMode(mode) {
         url: 'urlInputGroup',
         webcam: 'webcamInputGroup',
         batch: 'batchInputGroup',
+        directory: 'directoryInputGroup',
+        local_path: 'localPathInputGroup',
         stream: 'streamInputGroup'
     };
     
@@ -211,6 +228,21 @@ function handleBatchSelect(e) {
             </div>
         </div>`;
     log(`${count} Bilder für Batch`, 'info');
+}
+
+function handleDirectorySelect(e) {
+    const files = Array.from(e.target.files).filter(f => f.type.startsWith('image/'));
+    const count = files.length;
+    els.directoryDropPrompt.textContent = `${count} Bild(er) in Ordner`;
+    els.previewName.textContent = `Ordner: ${count} Bilder`;
+    els.previewBox.innerHTML = `
+        <div style="display:grid;place-items:center;height:100%;text-align:center;">
+            <div>
+                <div style="font-size:48px;margin-bottom:8px;">📁</div>
+                <div style="color:var(--text-secondary);">${count} Bilder</div>
+            </div>
+        </div>`;
+    log(`${count} Bilder aus Verzeichnis gewählt`, 'info');
 }
 
 function resetPreview() {
@@ -336,6 +368,8 @@ async function runInference() {
             case 'url': result = await runUrlStreaming(modelName, conf, iou, imgsz, save); break;
             case 'webcam': result = await runWebcamInference(modelName, conf, imgsz); break;
             case 'batch': result = await runBatchInference(modelName, conf, iou, imgsz); break;
+            case 'directory': result = await runDirectoryInference(modelName, conf, iou, imgsz); break;
+            case 'local_path': result = await runLocalPathInference(modelName, conf, iou, imgsz); break;
             case 'stream': result = await runStreamInference(modelName, conf, iou, imgsz, save); break;
             default: throw new Error('Unbekannter Modus');
         }
@@ -519,6 +553,46 @@ async function runBatchInference(modelName, conf, iou, imgsz) {
     const res = await fetch('/test_batch', { method: 'POST', body: formData });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Batch fehlgeschlagen');
+    
+    handleBatchResult(data);
+    return data;
+}
+
+async function runDirectoryInference(modelName, conf, iou, imgsz) {
+    const files = Array.from(els.directoryInput?.files || []).filter(f => f.type.startsWith('image/'));
+    if (!files.length) throw new Error('Bitte Ordner mit Bildern wählen');
+    
+    const formData = new FormData();
+    formData.append('conf', conf);
+    formData.append('iou', iou);
+    formData.append('imgsz', imgsz);
+    
+    for (let i = 0; i < files.length; i++) {
+        formData.append('images', files[i]);
+    }
+    
+    const res = await fetch('/test_batch', { method: 'POST', body: formData });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Verzeichnis-Upload fehlgeschlagen');
+    
+    handleBatchResult(data);
+    return data;
+}
+
+async function runLocalPathInference(modelName, conf, iou, imgsz) {
+    const pathValue = els.localPathInput?.value?.trim();
+    if (!pathValue) throw new Error('Bitte System-Pfad eingeben');
+    
+    const formData = new FormData();
+    formData.append('source_type', 'directory');
+    formData.append('source_value', pathValue);
+    formData.append('conf', conf);
+    formData.append('iou', iou);
+    formData.append('imgsz', imgsz);
+    
+    const res = await fetch('/test', { method: 'POST', body: formData });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Pfad-Inferenz fehlgeschlagen');
     
     handleBatchResult(data);
     return data;
@@ -1294,11 +1368,94 @@ window.annotateImages = annotateImages;
 window.exportDataset = exportDataset;
 window.clearDataset = clearDataset;
 window.showAnnotationDetails = showAnnotationDetails;
-// Model Download exports
-window.toggleModelCatalog = toggleModelCatalog;
-window.filterModels = filterModels;
-window.downloadModel = downloadModel;
-window.loadModelCatalog = loadModelCatalog;
+let catalogModels = [];
+
+async function toggleModelCatalog() {
+    const catalog = $('modelCatalog');
+    if (catalog.style.display === 'none') {
+        catalog.style.display = 'block';
+        await loadModelCatalog();
+    } else {
+        catalog.style.display = 'none';
+    }
+}
+
+async function loadModelCatalog() {
+    try {
+        const res = await fetch('/models/catalog');
+        const data = await res.json();
+        catalogModels = data.models || [];
+        filterModels('all');
+    } catch (err) {
+        showToast('Katalog-Fehler: ' + err.message, 'error');
+    }
+}
+
+function filterModels(version) {
+    const list = $('modelCatalogList');
+    if (!list) return;
+
+    // Filter logic
+    const filtered = version === 'all' 
+        ? catalogModels 
+        : catalogModels.filter(m => m.version === version);
+
+    // Update filter buttons
+    document.querySelectorAll('.filter-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.version === version);
+    });
+
+    if (filtered.length === 0) {
+        list.innerHTML = '<div class="empty-state">Keine Modelle für diese Version</div>';
+        return;
+    }
+
+    list.innerHTML = filtered.map(m => `
+        <div class="model-card catalog-card">
+            <div style="display:flex; justify-content:space-between; align-items:start;">
+                <h4 style="margin:0;">${m.name}</h4>
+                <span class="chip">${m.version.toUpperCase()}</span>
+            </div>
+            <div class="model-info" style="margin:10px 0;">
+                <span class="model-tag">${m.type}</span>
+                <span class="model-tag">${m.size}</span>
+            </div>
+            <div style="font-size:11px; color:var(--text-secondary); margin-bottom:12px;">
+                <div>Accuracy: ${m.accuracy}</div>
+                <div>Speed: ${m.speed}</div>
+            </div>
+            <button class="action btn-block" onclick="downloadModel('${m.name}')" id="dl-btn-${m.name.replace('.','-')}">
+                📥 Herunterladen
+            </button>
+        </div>
+    `).join('');
+}
+
+async function downloadModel(name) {
+    const btn = document.getElementById(`dl-btn-${name.replace('.','-')}`);
+    const originalText = btn.innerHTML;
+    
+    btn.disabled = true;
+    btn.innerHTML = '⏳ Lädt...';
+    
+    try {
+        const res = await fetch(`/models/download/${name}`, { method: 'POST' });
+        const data = await res.json();
+        
+        if (res.ok) {
+            showToast(`"${name}" erfolgreich geladen`, 'success');
+            btn.innerHTML = '✅ Fertig';
+            // Hauptliste aktualisieren
+            await updateModelList();
+        } else {
+            throw new Error(data.error || 'Download fehlgeschlagen');
+        }
+    } catch (err) {
+        showToast(err.message, 'error');
+        btn.disabled = false;
+        btn.innerHTML = originalText;
+    }
+}
 
 // ==================== FEW-SHOT AUTO-DETECTION ====================
 let fewShotSamples = [];

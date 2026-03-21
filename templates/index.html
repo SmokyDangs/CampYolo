@@ -101,6 +101,8 @@
                         <h4>📦 YOLO Modell-Katalog</h4>
                         <div class="catalog-filters">
                             <button class="filter-btn active" data-version="all" onclick="filterModels('all')">Alle</button>
+                            <button class="filter-btn" data-version="v12" onclick="filterModels('v12')">YOLO12</button>
+                            <button class="filter-btn" data-version="v11" onclick="filterModels('v11')">YOLOv11</button>
                             <button class="filter-btn" data-version="v10" onclick="filterModels('v10')">YOLOv10</button>
                             <button class="filter-btn" data-version="v8" onclick="filterModels('v8')">YOLOv8</button>
                             <button class="filter-btn" data-version="v5" onclick="filterModels('v5')">YOLOv5</button>
@@ -145,14 +147,16 @@
                                 <button class="source-tab" data-mode="url">URL</button>
                                 <button class="source-tab" data-mode="webcam">Webcam</button>
                                 <button class="source-tab" data-mode="batch">Batch</button>
+                                <button class="source-tab" data-mode="directory">Verzeichnis</button>
+                                <button class="source-tab" data-mode="local_path">Pfad</button>
                                 <button class="source-tab" data-mode="stream">Stream</button>
                             </div>
                         </div>
 
                         <div id="imageInputGroup" class="input-group">
                             <div class="dropzone" id="dropzone">
-                                <input type="file" id="imageInput" accept="image/*" hidden>
-                                <input type="file" id="videoInput" accept="video/*" hidden>
+                                <input type="file" id="imageInput" accept="image/*" style="display: none;">
+                                <input type="file" id="videoInput" accept="video/*" style="display: none;">
                                 <svg class="dropzone-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
                                 </svg>
@@ -173,13 +177,32 @@
 
                         <div id="batchInputGroup" class="input-group" style="display:none;">
                             <div class="dropzone" id="batchDropzone">
-                                <input type="file" id="batchInput" accept="image/*" multiple hidden>
+                                <input type="file" id="batchInput" accept="image/*" multiple style="display: none;">
                                 <svg class="dropzone-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path>
                                 </svg>
                                 <p>Mehrere Bilder ablegen</p>
                                 <button class="ghost">Auswählen</button>
                             </div>
+                        </div>
+
+                        <div id="directoryInputGroup" class="input-group" style="display:none;">
+                            <div class="dropzone" id="directoryDropzone">
+                                <input type="file" id="directoryInput" webkitdirectory mozdirectory directory style="display: none;">
+                                <svg class="dropzone-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path>
+                                </svg>
+                                <p id="directoryDropPrompt">Ordner auswählen</p>
+                                <button class="ghost">Verzeichnis wählen</button>
+                            </div>
+                        </div>
+
+                        <div id="localPathInputGroup" class="input-group" style="display:none;">
+                            <label class="field-label">Lokaler System-Pfad (Linux/Windows)</label>
+                            <div class="input-row">
+                                <input type="text" id="localPathInput" placeholder="C:\Users\Name\Pictures oder /home/user/pics" style="flex:1;">
+                            </div>
+                            <p class="muted" style="font-size:10px; margin-top:4px;">Nur verfügbar, wenn der Server lokal läuft.</p>
                         </div>
 
                         <div id="streamInputGroup" class="input-group" style="display:none;">
@@ -308,142 +331,72 @@
                             </div>
                             
                             <!-- Manual Annotation Editor - Professional -->
-                            <div id="manualAnnotationEditor" class="annotation-editor" style="display:none;">
-                                <!-- Editor Toolbar -->
-                                <div class="editor-toolbar">
-                                    <div class="toolbar-section">
-                                        <span class="toolbar-label">Modus:</span>
-                                        <div class="mode-switch">
-                                            <button class="mode-btn active" data-mode="draw" onclick="setEditorMode('draw')" title="Boxen zeichnen (D)">
-                                                <span class="mode-icon">✏️</span>
-                                                <span class="mode-label">Draw</span>
-                                            </button>
-                                            <button class="mode-btn" data-mode="select" onclick="setEditorMode('select')" title="Boxen auswählen (V)">
-                                                <span class="mode-icon">🖱️</span>
-                                                <span class="mode-label">Select</span>
-                                            </button>
-                                            <button class="mode-btn" data-mode="move" onclick="setEditorMode('move')" title="Boxen verschieben (M)">
-                                                <span class="mode-icon">✥</span>
-                                                <span class="mode-label">Move</span>
-                                            </button>
-                                        </div>
-                                    </div>
-                                    
-                                    <div class="toolbar-section">
-                                        <span class="toolbar-label">Klasse:</span>
-                                        <div class="class-input-wrapper">
-                                            <span class="input-icon">🏷️</span>
-                                            <input type="text" id="classNameInput" placeholder="Klasse" class="class-input" title="Klassen-Name">
-                                        </div>
-                                    </div>
-                                    
-                                    <div class="toolbar-section toolbar-actions">
-                                        <button class="btn btn-icon-btn" onclick="undo()" title="Rückgängig (Strg+Z)">↩️</button>
-                                        <button class="btn btn-icon-btn" onclick="redo()" title="Wiederherstellen (Strg+Y)">↪️</button>
-                                        <button class="btn btn-icon-btn" onclick="deleteSelected()" title="Löschen (Entf)">🗑️</button>
-                                        <button class="btn btn-icon-btn" onclick="clearAllAnnotations()" title="Alle löschen">⊗</button>
-                                    </div>
+                            <div id="manualAnnotationEditor" class="annotation-editor card glass-strong" style="display:none; position:fixed; inset:20px; z-index:1000; margin:0; padding:24px; display:flex; flex-direction:column;">
+                                <!-- Editor Header -->
+                                <div class="modal-header" style="margin-bottom:20px;">
+                                    <h3 class="modal-title">🎨 Manueller Annotation-Editor</h3>
+                                    <button class="modal-close" onclick="$('manualAnnotationEditor').style.display='none'" aria-label="Schließen">✕</button>
                                 </div>
                                 
-                                <!-- Quick Classes -->
-                                <div class="quick-classes-wrapper">
-                                    <span class="quick-classes-label">Schnellwahl:</span>
-                                    <div id="quickClasses" class="quick-classes">
-                                        <button class="quick-class-btn" data-class="person" title="Taste: 1">
-                                            <span class="quick-class-icon">👤</span>
-                                            <span class="quick-class-name">Person</span>
-                                        </button>
-                                        <button class="quick-class-btn" data-class="car" title="Taste: 2">
-                                            <span class="quick-class-icon">🚗</span>
-                                            <span class="quick-class-name">Car</span>
-                                        </button>
-                                        <button class="quick-class-btn" data-class="bicycle" title="Taste: 3">
-                                            <span class="quick-class-icon">🚴</span>
-                                            <span class="quick-class-name">Bike</span>
-                                        </button>
-                                        <button class="quick-class-btn" data-class="dog" title="Taste: 4">
-                                            <span class="quick-class-icon">🐕</span>
-                                            <span class="quick-class-name">Dog</span>
-                                        </button>
-                                        <button class="quick-class-btn" data-class="cat" title="Taste: 5">
-                                            <span class="quick-class-icon">🐱</span>
-                                            <span class="quick-class-name">Cat</span>
-                                        </button>
-                                        <button class="quick-class-btn" data-class="object" title="Taste: 6">
-                                            <span class="quick-class-icon">📦</span>
-                                            <span class="quick-class-name">Object</span>
-                                        </button>
-                                    </div>
-                                </div>
-                                
-                                <!-- Canvas Area mit Zoom Controls -->
-                                <div class="editor-canvas-area">
-                                    <div class="canvas-toolbar">
-                                        <div class="zoom-controls">
-                                            <span class="zoom-value" id="zoomValue">100%</span>
+                                <div style="display:grid; grid-template-columns: 1fr 280px; gap:24px; flex:1; overflow:hidden;">
+                                    <!-- Left Side: Canvas Area -->
+                                    <div style="display:flex; flex-direction:column; gap:16px; overflow:hidden;">
+                                        <!-- Editor Toolbar -->
+                                        <div class="editor-toolbar card glass" style="padding:12px; margin:0; display:flex; align-items:center; gap:20px; flex-wrap:wrap;">
+                                            <div class="toolbar-section">
+                                                <span class="toolbar-label">Modus:</span>
+                                                <div class="source-tabs" style="padding:4px; margin:0;">
+                                                    <button class="source-tab active" data-mode="draw" onclick="setEditorMode('draw')" title="Boxen zeichnen (D)">✏️ Draw</button>
+                                                    <button class="source-tab" data-mode="select" onclick="setEditorMode('select')" title="Boxen auswählen (V)">🖱️ Select</button>
+                                                </div>
+                                            </div>
+                                            
+                                            <div class="toolbar-section" style="flex:1;">
+                                                <span class="toolbar-label">Klasse:</span>
+                                                <input type="text" id="classNameInput" placeholder="Klassenname" class="class-input" style="width:100%; max-width:200px; margin-left:8px;">
+                                            </div>
+                                            
+                                            <div class="toolbar-section toolbar-actions" style="display:flex; gap:8px;">
+                                                <button class="ghost" onclick="undo()" title="Rückgängig (Strg+Z)">↩️</button>
+                                                <button class="ghost" onclick="deleteSelected()" title="Löschen (Entf)">🗑️</button>
+                                                <button class="ghost" onclick="clearAllAnnotations()" title="Alle löschen">⊗</button>
+                                            </div>
                                         </div>
-                                        <div class="canvas-info">
-                                            <span id="canvasSize">0×0</span>
-                                        </div>
-                                    </div>
-                                    
-                                    <div class="canvas-scroll-container">
-                                        <div class="canvas-wrapper">
-                                            <div class="canvas-container">
+
+                                        <!-- Canvas Scroll Area -->
+                                        <div class="editor-canvas-area card glass" style="flex:1; margin:0; overflow:auto; display:grid; place-items:center; background:#000;">
+                                            <div class="canvas-container" style="position:relative;">
                                                 <canvas id="annotationCanvas"></canvas>
-                                                <div id="canvasOverlay" class="canvas-overlay">
-                                                    <span class="overlay-icon">🖱️</span>
+                                                <div id="canvasOverlay" class="canvas-overlay" style="pointer-events:none;">
                                                     <span id="canvasStatus" class="overlay-text">Klicken & ziehen zum Zeichnen</span>
                                                 </div>
                                             </div>
                                         </div>
                                     </div>
-                                </div>
-                                
-                                <!-- Editor Footer mit Stats -->
-                                <div class="editor-footer">
-                                    <div class="stats-bar">
-                                        <div class="stat-item">
-                                            <span class="stat-icon">📊</span>
-                                            <span class="stat-value" id="annotationCount">0</span>
-                                            <span class="stat-label">Boxen</span>
+
+                                    <!-- Right Side: Sidebar -->
+                                    <div style="display:flex; flex-direction:column; gap:16px; overflow:hidden;">
+                                        <div class="card glass" style="padding:16px; margin:0; flex:1; display:flex; flex-direction:column; overflow:hidden;">
+                                            <h4 style="font-size:14px; margin-bottom:12px;">📑 Annotationen (<span id="annotationCount">0</span>)</h4>
+                                            <div id="annotationList" style="flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:8px; padding-right:4px;">
+                                                <div class="empty-state">Keine Annotationen</div>
+                                            </div>
                                         </div>
-                                        <div class="stat-item">
-                                            <span class="stat-icon">🏷️</span>
-                                            <span class="stat-value" id="currentClassDisplay">-</span>
-                                            <span class="stat-label">Klasse</span>
+
+                                        <div class="card glass" style="padding:16px; margin:0;">
+                                            <h4 style="font-size:14px; margin-bottom:12px;">⌨️ Shortcuts</h4>
+                                            <div style="font-size:11px; display:grid; gap:8px;">
+                                                <div style="display:flex; justify-content:space-between;"><span>Zeichnen</span> <kbd>D</kbd></div>
+                                                <div style="display:flex; justify-content:space-between;"><span>Auswählen</span> <kbd>V</kbd></div>
+                                                <div style="display:flex; justify-content:space-between;"><span>Löschen</span> <kbd>Entf</kbd></div>
+                                                <div style="display:flex; justify-content:space-between;"><span>Undo</span> <kbd>Strg+Z</kbd></div>
+                                            </div>
                                         </div>
-                                        <div class="stat-item">
-                                            <span class="stat-icon">🎯</span>
-                                            <span class="stat-value" id="selectedCount">0</span>
-                                            <span class="stat-label">ausgewählt</span>
-                                        </div>
+
+                                        <button class="action btn-block" onclick="saveManualAnnotations()" id="saveAnnotationsBtn" disabled style="height:50px; font-size:15px;">
+                                            💾 Übernehmen
+                                        </button>
                                     </div>
-                                    <div class="shortcuts-hint">
-                                        <kbd>D</kbd> Draw
-                                        <kbd>V</kbd> Select
-                                        <kbd>M</kbd> Move
-                                        <kbd>Strg+Z</kbd> Undo
-                                        <kbd>Strg+Y</kbd> Redo
-                                        <kbd>Entf</kbd> Delete
-                                        <kbd>1-6</kbd> Klasse
-                                    </div>
-                                </div>
-                                
-                                <!-- Layer Panel -->
-                                <div class="layer-panel">
-                                    <div class="layer-header">
-                                        <span class="layer-title">📑 Annotationen</span>
-                                    </div>
-                                    <div id="annotationList" class="layer-list"></div>
-                                </div>
-                                
-                                <!-- Action Buttons -->
-                                <div class="editor-actions">
-                                    <button class="btn btn-success btn-block" onclick="saveManualAnnotations()" id="saveAnnotationsBtn" disabled>
-                                        <span class="btn-icon">💾</span>
-                                        <span class="btn-text">Annotationen übernehmen</span>
-                                    </button>
                                 </div>
                             </div>
                             

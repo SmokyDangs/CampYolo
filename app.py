@@ -1,4 +1,4 @@
-import os, gc, time, shutil, json, io, base64, re, subprocess, csv, numpy as np, logging, sys, traceback
+import os, gc, time, shutil, json, io, base64, re, subprocess, csv, numpy as np, logging, sys, traceback, flask
 from pathlib import Path
 from datetime import datetime
 from collections import deque
@@ -284,7 +284,9 @@ def export_results(export_format):
 
 @app.route('/uploads/<path:filename>')
 def serve_upload(filename):
-    full_path = os.path.join(app.config['UPLOAD_FOLDER_ABS'], filename)
+    # Verhindere Path Traversal durch Nutzung von nur dem Dateinamen
+    safe_filename = os.path.basename(filename)
+    full_path = os.path.join(app.config['UPLOAD_FOLDER_ABS'], safe_filename)
     if not os.path.exists(full_path): return jsonify({"error": "Datei nicht gefunden"}), 404
     mime, _ = mimetypes.guess_type(full_path)
     return send_file(full_path, mimetype=mime, as_attachment=False, conditional=True)
@@ -296,37 +298,38 @@ def list_models():
 
 # ==================== YOLO MODEL DOWNLOAD ====================
 YOLO_MODELS = [
-    # YOLOv8 Models
-    {"name": "yolov8n.pt", "type": "detect", "size": "3.2 MB", "speed": "80 FPS", "accuracy": "Low", "version": "v8", "url": "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n.pt"},
-    {"name": "yolov8s.pt", "type": "detect", "size": "11.2 MB", "speed": "40 FPS", "accuracy": "Medium", "version": "v8", "url": "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8s.pt"},
-    {"name": "yolov8m.pt", "type": "detect", "size": "25.9 MB", "speed": "20 FPS", "accuracy": "High", "version": "v8", "url": "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8m.pt"},
-    {"name": "yolov8l.pt", "type": "detect", "size": "43.7 MB", "speed": "10 FPS", "accuracy": "Very High", "version": "v8", "url": "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8l.pt"},
-    {"name": "yolov8x.pt", "type": "detect", "size": "68.2 MB", "speed": "5 FPS", "accuracy": "Highest", "version": "v8", "url": "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8x.pt"},
+    # YOLO12 (Latest 2026/SOTA)
+    {"name": "yolo12n.pt", "type": "detect", "size": "2.6 MB", "speed": "120 FPS", "accuracy": "High", "version": "v12", "url": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo12n.pt"},
+    {"name": "yolo12s.pt", "type": "detect", "size": "9.3 MB", "speed": "80 FPS", "accuracy": "Very High", "version": "v12", "url": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo12s.pt"},
+    {"name": "yolo12m.pt", "type": "detect", "size": "20.1 MB", "speed": "50 FPS", "accuracy": "Excellent", "version": "v12", "url": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo12m.pt"},
+    {"name": "yolo12l.pt", "type": "detect", "size": "35.8 MB", "speed": "30 FPS", "accuracy": "SOTA", "version": "v12", "url": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo12l.pt"},
+    {"name": "yolo12x.pt", "type": "detect", "size": "58.4 MB", "speed": "15 FPS", "accuracy": "Highest", "version": "v12", "url": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo12x.pt"},
+
+    # YOLOv11 (Newest Version)
+    {"name": "yolo11n.pt", "type": "detect", "size": "2.6 MB", "speed": "115 FPS", "accuracy": "High", "version": "v11", "url": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n.pt"},
+    {"name": "yolo11s.pt", "type": "detect", "size": "9.4 MB", "speed": "75 FPS", "accuracy": "Very High", "version": "v11", "url": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11s.pt"},
+    {"name": "yolo11m.pt", "type": "detect", "size": "20.1 MB", "speed": "45 FPS", "accuracy": "Excellent", "version": "v11", "url": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11m.pt"},
+    {"name": "yolo11l.pt", "type": "detect", "size": "36.5 MB", "speed": "25 FPS", "accuracy": "SOTA", "version": "v11", "url": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11l.pt"},
+    {"name": "yolo11x.pt", "type": "detect", "size": "64.1 MB", "speed": "12 FPS", "accuracy": "Highest", "version": "v11", "url": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11x.pt"},
+
+    # YOLOv10
+    {"name": "yolov10n.pt", "type": "detect", "size": "2.8 MB", "speed": "100 FPS", "accuracy": "Medium", "version": "v10", "url": "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov10n.pt"},
+    {"name": "yolov10s.pt", "type": "detect", "size": "9.8 MB", "speed": "65 FPS", "accuracy": "High", "version": "v10", "url": "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov10s.pt"},
+    {"name": "yolov10m.pt", "type": "detect", "size": "23.5 MB", "speed": "35 FPS", "accuracy": "Very High", "version": "v10", "url": "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov10m.pt"},
+
+    # YOLOv8
+    {"name": "yolov8n.pt", "type": "detect", "size": "3.2 MB", "speed": "90 FPS", "accuracy": "Medium", "version": "v8", "url": "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n.pt"},
+    {"name": "yolov8s.pt", "type": "detect", "size": "11.2 MB", "speed": "60 FPS", "accuracy": "High", "version": "v8", "url": "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8s.pt"},
+    {"name": "yolov8m.pt", "type": "detect", "size": "25.9 MB", "speed": "30 FPS", "accuracy": "Very High", "version": "v8", "url": "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8m.pt"},
     
-    # YOLOv8 Pose
-    {"name": "yolov8n-pose.pt", "type": "pose", "size": "3.4 MB", "speed": "75 FPS", "accuracy": "Low", "version": "v8", "url": "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n-pose.pt"},
-    {"name": "yolov8s-pose.pt", "type": "pose", "size": "11.8 MB", "speed": "38 FPS", "accuracy": "Medium", "version": "v8", "url": "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8s-pose.pt"},
-    {"name": "yolov8m-pose.pt", "type": "pose", "size": "27.2 MB", "speed": "18 FPS", "accuracy": "High", "version": "v8", "url": "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8m-pose.pt"},
-    
-    # YOLOv8 Segmentation
-    {"name": "yolov8n-seg.pt", "type": "seg", "size": "3.5 MB", "speed": "70 FPS", "accuracy": "Low", "version": "v8", "url": "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n-seg.pt"},
-    {"name": "yolov8s-seg.pt", "type": "seg", "size": "12.4 MB", "speed": "35 FPS", "accuracy": "Medium", "version": "v8", "url": "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8s-seg.pt"},
-    
-    # YOLOv8 Classification
-    {"name": "yolov8n-cls.pt", "type": "cls", "size": "2.8 MB", "speed": "85 FPS", "accuracy": "Low", "version": "v8", "url": "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n-cls.pt"},
-    {"name": "yolov8s-cls.pt", "type": "cls", "size": "10.2 MB", "speed": "45 FPS", "accuracy": "Medium", "version": "v8", "url": "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8s-cls.pt"},
-    
-    # YOLOv5 Models
-    {"name": "yolov5n.pt", "type": "detect", "size": "2.2 MB", "speed": "90 FPS", "accuracy": "Low", "version": "v5", "url": "https://github.com/ultralytics/yolov5/releases/download/v6.2/yolov5n.pt"},
-    {"name": "yolov5s.pt", "type": "detect", "size": "7.2 MB", "speed": "50 FPS", "accuracy": "Medium", "version": "v5", "url": "https://github.com/ultralytics/yolov5/releases/download/v6.2/yolov5s.pt"},
-    {"name": "yolov5m.pt", "type": "detect", "size": "21.2 MB", "speed": "25 FPS", "accuracy": "High", "version": "v5", "url": "https://github.com/ultralytics/yolov5/releases/download/v6.2/yolov5m.pt"},
-    {"name": "yolov5l.pt", "type": "detect", "size": "46.5 MB", "speed": "12 FPS", "accuracy": "Very High", "version": "v5", "url": "https://github.com/ultralytics/yolov5/releases/download/v6.2/yolov5l.pt"},
-    {"name": "yolov5x.pt", "type": "detect", "size": "86.7 MB", "speed": "6 FPS", "accuracy": "Highest", "version": "v5", "url": "https://github.com/ultralytics/yolov5/releases/download/v6.2/yolov5x.pt"},
-    
-    # YOLOv10 Models
-    {"name": "yolov10n.pt", "type": "detect", "size": "2.8 MB", "speed": "85 FPS", "accuracy": "Low", "version": "v10", "url": "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov10n.pt"},
-    {"name": "yolov10s.pt", "type": "detect", "size": "9.8 MB", "speed": "45 FPS", "accuracy": "Medium", "version": "v10", "url": "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov10s.pt"},
-    {"name": "yolov10m.pt", "type": "detect", "size": "23.5 MB", "speed": "22 FPS", "accuracy": "High", "version": "v10", "url": "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov10m.pt"},
+    # YOLOv8 Specialized
+    {"name": "yolov8n-pose.pt", "type": "pose", "size": "3.4 MB", "speed": "80 FPS", "accuracy": "Medium", "version": "v8", "url": "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n-pose.pt"},
+    {"name": "yolov8n-seg.pt", "type": "seg", "size": "3.5 MB", "speed": "75 FPS", "accuracy": "Medium", "version": "v8", "url": "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n-seg.pt"},
+    {"name": "yolov8n-cls.pt", "type": "cls", "size": "2.8 MB", "speed": "100 FPS", "accuracy": "Medium", "version": "v8", "url": "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n-cls.pt"},
+
+    # YOLOv5
+    {"name": "yolov5n.pt", "type": "detect", "size": "2.2 MB", "speed": "110 FPS", "accuracy": "Medium", "version": "v5", "url": "https://github.com/ultralytics/yolov5/releases/download/v6.2/yolov5n.pt"},
+    {"name": "yolov5s.pt", "type": "detect", "size": "7.2 MB", "speed": "70 FPS", "accuracy": "High", "version": "v5", "url": "https://github.com/ultralytics/yolov5/releases/download/v6.2/yolov5s.pt"},
 ]
 
 @app.route('/models/catalog', methods=['GET'])
@@ -641,28 +644,41 @@ def pick_annotated_video(save_dir: Path, original_path: str, upload_root: Path) 
             if f.resolve() != orig: annotated_candidates.append(f.resolve())
         for f in save_dir.glob("*.mov"):
             if f.resolve() != orig: annotated_candidates.append(f.resolve())
-    runs_dir = Path.home() / "runs"
-    if runs_dir.exists():
-        for f in runs_dir.rglob("*.mp4"):
-            if f.resolve() != orig: annotated_candidates.append(f.resolve())
-    if upload_root.exists():
+    
+    # Suche in home/runs falls nichts im lokalen save_dir gefunden wurde
+    if not annotated_candidates:
+        runs_dir = Path.home() / "runs"
+        if runs_dir.exists():
+            for f in runs_dir.rglob("*.mp4"):
+                if f.resolve() != orig: annotated_candidates.append(f.resolve())
+    
+    if not annotated_candidates and upload_root.exists():
         for f in upload_root.glob("*.mp4"):
             if f.resolve() != orig and "annotated" in f.name.lower(): annotated_candidates.append(f.resolve())
+            
     if not annotated_candidates: return None
-    def score(p: Path): return (1 if save_dir in p.parents else 0, p.stat().st_mtime)
-    candidate = sorted(annotated_candidates, key=score, reverse=True)[0]
+    
+    # Sortiere nach Aktualität
+    candidate = sorted(annotated_candidates, key=lambda p: p.stat().st_mtime, reverse=True)[0]
+    
     orig_name = orig.name if orig.name else "video"
     safe_name = re.sub(r'[<>:"/\\|?*]', '_', orig_name)
     if len(safe_name) > 50: safe_name = safe_name[:50]
+    
     dest = upload_root / f"annotated_{safe_name}_{int(time.time())}{candidate.suffix}"
-    try: shutil.copy2(candidate, dest)
-    except Exception as e: print(f"Kopierfehler: {e}"); dest = candidate
+    try: 
+        shutil.copy2(candidate, dest)
+    except Exception as e: 
+        logger.error(f"Kopierfehler: {e}")
+        dest = candidate
+        
     if dest.suffix.lower() != ".mp4":
-        mp4_dest = upload_root / f"annotated_{safe_name}_{int(time.time())}.mp4"
-        if convert_to_mp4(dest, mp4_dest): dest = mp4_dest
-    else:
-        mp4_dest = upload_root / f"annotated_{safe_name}_{int(time.time())}.mp4"
-        if convert_to_mp4(dest, mp4_dest): dest = mp4_dest
+        mp4_dest = dest.with_suffix(".mp4")
+        if convert_to_mp4(dest, mp4_dest): 
+            # Original löschen falls Kopie im upload_root war
+            if dest != candidate and dest.exists(): os.remove(dest)
+            dest = mp4_dest
+            
     return dest if dest.exists() else None
 
 def convert_to_mp4(src: Path, dest: Path) -> bool:
@@ -677,14 +693,30 @@ def convert_to_mp4(src: Path, dest: Path) -> bool:
         cap = cv2.VideoCapture(str(src))
         if not cap.isOpened(): return False
         fps, width, height = cap.get(cv2.CAP_PROP_FPS) or 25.0, int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        fourcc = cv2.VideoWriter_fourcc(*"avc1")
-        out = cv2.VideoWriter(str(dest), fourcc, fps, (width, height))
-        while True:
-            ret, frame = cap.read()
-            if not ret: break
-            out.write(frame)
-        cap.release(); out.release()
-        return dest.exists() and dest.stat().st_size > 0
+        
+        # Versuche verschiedene Codecs
+        codecs = ["avc1", "mp4v", "XVID", "MJPG"]
+        success = False
+        
+        for codec in codecs:
+            try:
+                fourcc = cv2.VideoWriter_fourcc(*codec)
+                out = cv2.VideoWriter(str(dest), fourcc, fps, (width, height))
+                if not out.isOpened(): continue
+                
+                cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                while True:
+                    ret, frame = cap.read()
+                    if not ret: break
+                    out.write(frame)
+                out.release()
+                if dest.exists() and dest.stat().st_size > 100:
+                    success = True
+                    break
+            except: continue
+        
+        cap.release()
+        return success
     except Exception as e: print(f"OpenCV Fehler: {e}"); return False
 
 def validate_video(path: str, max_mb: int, max_duration_s: int) -> str | None:
@@ -744,7 +776,7 @@ def test_webcam():
     
     def generate():
         """Generator-Funktion für MJPEG-Stream"""
-        frame_count, max_frames = 0, 300
+        frame_count, max_frames = 0, 5000
         inference_times = []
         cap = None
         
@@ -835,7 +867,7 @@ def test_stream():
     def generate():
         cap = cv2.VideoCapture(stream_url)
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640); cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-        frame_count, max_frames = 0, 300
+        frame_count, max_frames = 0, 5000
         try:
             while cap.isOpened() and frame_count < max_frames:
                 ret, frame = cap.read()

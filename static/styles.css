@@ -1988,14 +1988,130 @@ input[type="range"]::-moz-range-thumb:hover {
     gap: 12px;
 }
 
-/* ==================== Few-Shot Section ==================== */
-.few-shot-section {
-    background: linear-gradient(135deg, rgba(99, 102, 241, 0.08) 0%, rgba(139, 92, 246, 0.08) 100%);
-    border: 1px solid rgba(99, 102, 241, 0.2);
-    border-radius: var(--radius-xl);
-    padding: 24px;
-    margin-bottom: 24px;
-    box-shadow: var(--shadow-glow);
+/* ==================== Manual Annotation Editor ==================== */
+.annotation-editor {
+    box-shadow: 
+        0 0 0 100vmax rgba(0, 0, 0, 0.85),
+        var(--shadow-2xl),
+        0 0 60px rgba(99, 102, 241, 0.3);
+    animation: editorFadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes editorFadeIn {
+    from { opacity: 0; transform: scale(0.95) translateY(20px); }
+    to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 16px;
+}
+
+.modal-title {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.modal-close {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+    transition: var(--transition-base);
+    color: var(--text-secondary);
+}
+
+.modal-close:hover {
+    background: var(--error);
+    color: white;
+    border-color: transparent;
+    transform: rotate(90deg);
+}
+
+.layer-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    cursor: pointer;
+    transition: var(--transition-fast);
+}
+
+.layer-item:hover {
+    background: var(--bg-secondary);
+    border-color: var(--accent-primary);
+    transform: translateX(4px);
+}
+
+.layer-item.selected {
+    background: rgba(99, 102, 241, 0.15);
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 12px rgba(99, 102, 241, 0.2);
+}
+
+.layer-class {
+    font-weight: 700;
+    font-size: 13px;
+    color: var(--accent-primary);
+}
+
+.layer-coords {
+    font-size: 10px;
+    color: var(--text-muted);
+    font-family: 'JetBrains Mono', monospace;
+}
+
+.layer-action-btn {
+    margin-left: auto;
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    display: grid;
+    place-items: center;
+    transition: var(--transition-fast);
+}
+
+.layer-action-btn:hover {
+    background: var(--error-bg);
+    color: var(--error);
+}
+
+/* ==================== Modal Overlay ==================== */
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.8);
+    backdrop-filter: blur(8px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+    animation: fadeIn 0.3s ease;
+}
+
+.modal {
+    background: var(--bg-glass-strong);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-2xl);
+    padding: 32px;
+    width: 100%;
+    max-width: 500px;
+    box-shadow: var(--shadow-2xl);
+    animation: scaleIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .few-shot-grid {
