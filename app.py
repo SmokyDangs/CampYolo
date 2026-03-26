@@ -493,13 +493,18 @@ def test_model():
             try: cam_id = int(source_value) if source_value else 0
             except ValueError: return jsonify({"error": "Ungültige Webcam-ID"}), 400
             inference_source = cam_id
+        elif source_type == 'local_path' and source_value:
+            # Lokaler Dateipfad (Windows, Linux, macOS)
+            inference_source = normalize_local_path(source_value)
+            if not os.path.exists(inference_source):
+                return jsonify({"error": f"Datei nicht gefunden: {inference_source}"}), 404
         elif source_type == 'directory' and source_value:
             if not os.path.exists(source_value): return jsonify({"error": f"Verzeichnis nicht gefunden"}), 404
             inference_source = source_value
         elif source_type == 'glob' and source_value: inference_source = source_value
         elif source_type == 'screenshot': inference_source = 'screen'
         else: return jsonify({"error": f"Ungültige Quelle: {source_type}"}), 400
-        stream_mode = source_type in {'video', 'url', 'webcam', 'directory', 'glob', 'stream'}
+        stream_mode = source_type in {'video', 'url', 'webcam', 'directory', 'glob', 'stream', 'local_path'}
         # Nutze globales DEVICE (CUDA falls verfügbar)
         device_override = DEVICE if source_type in {'webcam', 'stream'} else DEVICE
         with torch.inference_mode():
@@ -523,7 +528,7 @@ def test_model():
                             "detections": all_detections[0].get("detections", []) if all_detections else [],
                             "image_url": f"/uploads/{annotated_filename}" if annotated_filename else None,
                             "speed": all_detections[0].get("speed", {}) if all_detections else {}}
-        if save and source_type in {'video', 'url', 'webcam', 'directory', 'glob', 'stream'} and last_save_dir:
+        if save and source_type in {'video', 'url', 'webcam', 'directory', 'glob', 'stream', 'local_path'} and last_save_dir:
             upload_root = Path(app.config['UPLOAD_FOLDER_ABS']).resolve()
             annotated_video = pick_annotated_video(last_save_dir, inference_source, upload_root)
             if annotated_video: response_payload["video_url"] = f"/uploads/{annotated_video.name}"
@@ -535,6 +540,152 @@ def test_model():
         if img_path and os.path.exists(img_path):
             try: os.remove(img_path)
             except: pass
+
+# ==================== LOKALER DATEIPFAD SUPPORT ====================
+def normalize_local_path(path):
+    """
+    Normalisiert lokale Dateipfade für alle Betriebssysteme.
+    Unterstützt Windows (C:\...), Linux (/home/...), macOS (/Users/...)
+    """
+    if not path:
+        return path
+    
+    # Backslashes zu Forward Slashes (Windows Pfade)
+    normalized = path.replace('\\', '/')
+    
+    # Entferne führende/anhängende Leerzeichen und Anführungszeichen
+    normalized = normalized.strip().strip('"').strip("'")
+    
+    # Windows UNC Pfade (\\server\share -> //server/share)
+    if normalized.startswith('//'):
+        normalized = '/' + normalized.lstrip('/')
+    
+    # Prüfe ob es ein absoluter Pfad ist
+    if os.path.isabs(normalized) or os.path.exists(normalized):
+        return normalized
+    
+    # Versuche relative Pfade vom aktuellen Verzeichnis
+    abs_path = os.path.abspath(normalized)
+    if os.path.exists(abs_path):
+        return abs_path
+    
+    return normalized
+
+@app.route('/test_local_path', methods=['POST'])
+def test_local_path():
+    """
+    Verarbeitet lokale Dateipfade aus dem Dateiexplorer.
+    Funktioniert betriebssystemübergreifend (Windows, Linux, macOS).
+    """
+    if not active_model["instance"]:
+        return jsonify({"error": "Kein Modell geladen"}), 400
+    
+    local_path = request.form.get('path', '')
+    if not local_path:
+        return jsonify({"error": "Kein Pfad angegeben"}), 400
+    
+    try:
+        conf = float(request.form.get('conf', 0.25))
+        iou = float(request.form.get('iou', 0.45))
+        imgsz = int(request.form.get('imgsz', 640))
+        save = request.form.get('save', 'true').lower() == 'true'
+    except ValueError:
+        return jsonify({"error": "Ungültige Parameter"}), 400
+    
+    # Pfad normalisieren
+    normalized_path = normalize_local_path(local_path)
+    
+    # Pfad-Validierung
+    if not os.path.exists(normalized_path):
+        return jsonify({
+            "error": f"Pfad nicht gefunden: {normalized_path}",
+            "tried_path": normalized_path,
+            "os": os.name,
+            "help": "Bitte prüfen Sie den Pfad. Unter Windows: C:\\Pfad\\Datei.jpg, Linux: /home/user/datei.jpg"
+        }), 404
+    
+    # Prüfen ob es eine Datei oder ein Verzeichnis ist
+    is_directory = os.path.isdir(normalized_path)
+    is_file = os.path.isfile(normalized_path)
+    
+    if not is_file and not is_directory:
+        return jsonify({"error": "Ungültiger Pfad: Keine Datei oder kein Verzeichnis"}), 400
+    
+    try:
+        with torch.inference_mode():
+            results = active_model["instance"](
+                normalized_path,
+                conf=conf,
+                iou=iou,
+                imgsz=imgsz,
+                save=save,
+                show=False,
+                stream=True,
+                verbose=False,
+                device=DEVICE
+            )
+            
+            all_detections, last_save_dir = [], None
+            for r in results:
+                det, save_dir = extract_results_data([r])
+                all_detections.extend(det)
+                if save_dir:
+                    last_save_dir = save_dir
+            
+            # Annotiertes Ergebnis speichern
+            annotated_filename = None
+            if save and is_file:
+                annotated_filename = f"result_{int(time.time() * 1000)}.jpg"
+                annotated_path = os.path.join(app.config['UPLOAD_FOLDER_ABS'], annotated_filename)
+                try:
+                    with torch.inference_mode():
+                        res_single = active_model["instance"](
+                            normalized_path,
+                            conf=conf,
+                            iou=iou,
+                            imgsz=imgsz,
+                            save=False,
+                            show=False,
+                            stream=False,
+                            verbose=False
+                        )
+                    if res_single and len(res_single) == 1:
+                        res_single[0].save(filename=annotated_path)
+                except Exception as e:
+                    logger.warning(f"Konnte annotiertes Bild nicht speichern: {e}")
+                    annotated_filename = None
+            
+            response_payload = {
+                "model_used": active_model["name"],
+                "source_type": "local_path",
+                "source_value": normalized_path,
+                "path_type": "directory" if is_directory else "file",
+                "parameters": {"conf": conf, "iou": iou, "imgsz": imgsz},
+                "results": all_detections,
+                "detections": all_detections[0].get("detections", []) if all_detections else [],
+                "image_url": f"/uploads/{annotated_filename}" if annotated_filename else None,
+                "speed": all_detections[0].get("speed", {}) if all_detections else {},
+                "os": os.name,
+                "files_count": len(all_detections) if is_directory else 1
+            }
+            
+            save_to_history(
+                response_payload,
+                active_model["name"],
+                "local_path",
+                normalized_path,
+                all_detections[0].get("speed", {}).get("inference", 0) if all_detections else 0
+            )
+            
+            return jsonify(response_payload)
+            
+    except Exception as e:
+        logger.error(f"Fehler bei lokalem Pfad: {e}")
+        return jsonify({
+            "error": str(e),
+            "path": normalized_path,
+            "os": os.name
+        }), 500
 
 @app.route('/test_video', methods=['POST'])
 def test_video():

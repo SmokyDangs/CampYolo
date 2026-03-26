@@ -6,7 +6,15 @@ const state = {
     mode: 'image',
     activeModel: null,
     processing: false,
-    stats: { totalInferences: 0, totalDetections: 0, avgTime: 0 }
+    stats: { totalInferences: 0, totalDetections: 0, avgTime: 0 },
+    settings: {
+        conf: 0.25,
+        iou: 0.45,
+        imgsz: 640,
+        saveResults: true,
+        showLabels: true,
+        theme: 'dark'
+    }
 };
 
 const els = {};
@@ -60,6 +68,8 @@ document.addEventListener('DOMContentLoaded', () => {
     setupParamLabels();
     setupDatasetTab();
     setupFewShotDetection();
+    loadSettings();
+    setupSettingsAutoSave();
 });
 
 function setupNav() {
@@ -98,6 +108,58 @@ function setupDropzones() {
     setupDropzone(els.dropzone, () => state.mode === 'video' ? els.videoInput : els.imageInput);
     setupDropzone(els.batchDropzone, () => els.batchInput, true);
     setupDropzone($('directoryDropzone'), () => els.directoryInput);
+    setupLocalPathDropzone();
+}
+
+function setupLocalPathDropzone() {
+    // Drag & Drop für lokale Pfade aus Dateiexplorer
+    const localPathGroup = $('localPathInputGroup');
+    if (!localPathGroup) return;
+    
+    // Globales Drag & Drop für alle Dateien
+    document.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        // Visuelles Feedback bei Drag über lokalen Pfad-Bereich
+        if (state.mode === 'local_path') {
+            localPathGroup.style.borderColor = 'var(--accent-primary)';
+            localPathGroup.style.background = 'var(--accent-gradient-subtle)';
+        }
+    });
+    
+    document.addEventListener('dragleave', (e) => {
+        if (e.target === localPathGroup || !localPathGroup.contains(e.target)) {
+            localPathGroup.style.borderColor = '';
+            localPathGroup.style.background = '';
+        }
+    });
+    
+    document.addEventListener('drop', (e) => {
+        e.preventDefault();
+        const input = els.localPathInput;
+        if (!input) return;
+        
+        // Dateien aus Explorer verarbeiten
+        if (e.dataTransfer?.files?.length > 0) {
+            const file = e.dataTransfer.files[0];
+            // Hinweis: Browser können aus Sicherheitsgründen keinen vollständigen Pfad lesen
+            // User muss den Pfad manuell eingeben oder Copy-Paste verwenden
+            showToast('Datei erkannt. Bitte Pfad manuell eingeben oder kopieren.', 'info');
+        }
+        
+        // Text-Pfad aus Clipboard (Strg+V im Dokument)
+        const text = e.dataTransfer?.getData('text');
+        if (text && isValidPath(text)) {
+            input.value = text.trim();
+            showToast(`Pfad eingefügt: ${text.trim()}`, 'success');
+        }
+    });
+}
+
+function isValidPath(text) {
+    // Prüfen ob Text ein gültiger Pfad sein könnte
+    const trimmed = text.trim();
+    // Windows: C:\..., Linux/Mac: /...
+    return /^[A-Z]:\\/.test(trimmed) || /^\//.test(trimmed) || /^\\\\/.test(trimmed);
 }
 
 function setupDropzone(dz, getInput, isBatch = false) {
@@ -210,8 +272,8 @@ function handleFileSelect(e) {
     const isVideo = file.type.startsWith('video/') || file.name.match(/\.(mp4|avi|mov|mkv|webm)$/i);
     
     els.previewBox.innerHTML = isVideo
-        ? `<video controls src="${url}" style="width:100%;height:100%;object-fit:contain;"></video>`
-        : `<img src="${url}" alt="preview" style="width:100%;height:100%;object-fit:contain;">`;
+        ? `<video controls src="${url}" class="preview-media"></video>`
+        : `<img src="${url}" alt="preview" class="preview-media">`;
     
     els.resultLink.style.display = 'none';
     log(`${isVideo ? 'Video' : 'Bild'}: ${file.name}`, 'success');
@@ -221,10 +283,10 @@ function handleBatchSelect(e) {
     const count = e.target.files.length;
     els.previewName.textContent = `${count} Datei(en)`;
     els.previewBox.innerHTML = `
-        <div style="display:grid;place-items:center;height:100%;text-align:center;">
+        <div class="preview-folder">
             <div>
-                <div style="font-size:48px;margin-bottom:8px;">📁</div>
-                <div style="color:var(--text-secondary);">${count} Bilder</div>
+                <div class="preview-folder-icon">📁</div>
+                <div class="preview-folder-count">${count} Bilder</div>
             </div>
         </div>`;
     log(`${count} Bilder für Batch`, 'info');
@@ -236,10 +298,10 @@ function handleDirectorySelect(e) {
     els.directoryDropPrompt.textContent = `${count} Bild(er) in Ordner`;
     els.previewName.textContent = `Ordner: ${count} Bilder`;
     els.previewBox.innerHTML = `
-        <div style="display:grid;place-items:center;height:100%;text-align:center;">
+        <div class="preview-folder">
             <div>
-                <div style="font-size:48px;margin-bottom:8px;">📁</div>
-                <div style="color:var(--text-secondary);">${count} Bilder</div>
+                <div class="preview-folder-icon">📁</div>
+                <div class="preview-folder-count">${count} Bilder</div>
             </div>
         </div>`;
     log(`${count} Bilder aus Verzeichnis gewählt`, 'info');
@@ -248,8 +310,8 @@ function handleDirectorySelect(e) {
 function resetPreview() {
     els.previewName.textContent = 'Keine Datei';
     els.previewBox.innerHTML = `
-        <div style="text-align:center;color:var(--text-muted);font-size:12px;">
-            <svg class="dropzone-icon" style="margin:0 auto 8px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div class="preview-placeholder">
+            <svg class="dropzone-icon preview-placeholder-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
             </svg>
             <div>Vorschau hier</div>
@@ -273,11 +335,11 @@ async function updateModelList() {
         if (active) {
             els.selectedModel.value = active;
             if (activePill) {
-                activePill.style.display = 'inline-flex';
+                activePill.classList.add('active');
                 activeLabel.textContent = active;
             }
         } else if (activePill) {
-            activePill.style.display = 'none';
+            activePill.classList.remove('active');
         }
         
         if (!models.length) {
@@ -418,12 +480,12 @@ async function runVideoStreaming(modelName, save) {
     const file = els.videoInput.files[0];
     const formData = new FormData();
     formData.append('video', file);
-    
+
     els.previewBox.innerHTML = `
-        <div style="display:grid;place-items:center;height:100%;">
-            <div style="text-align:center;">
-                <div class="spinner" style="margin:0 auto 16px;"></div>
-                <div style="color:var(--text-secondary);">Video wird verarbeitet...</div>
+        <div class="preview-video-processing">
+            <div class="preview-video-processing-content">
+                <div class="spinner preview-video-processing-spinner"></div>
+                <div class="preview-video-processing-label">Video wird verarbeitet...</div>
             </div>
         </div>`;
     els.previewName.textContent = file.name;
@@ -529,7 +591,7 @@ function handleStreamPayload(p) {
 
 async function runWebcamInference(modelName, conf, imgsz) {
     const camId = els.webcamIdInput?.value || '0';
-    els.previewBox.innerHTML = `<img src="/test_webcam?cam_id=${camId}&conf=${conf}&imgsz=${imgsz}" style="width:100%;height:100%;object-fit:contain;" alt="Webcam">`;
+    els.previewBox.innerHTML = `<img src="/test_webcam?cam_id=${camId}&conf=${conf}&imgsz=${imgsz}" class="preview-media" alt="Webcam">`;
     els.previewName.textContent = `Webcam ${camId}`;
     log(`Webcam-Stream gestartet (ID: ${camId})`, 'success');
     stopProgress(true);
@@ -582,19 +644,25 @@ async function runDirectoryInference(modelName, conf, iou, imgsz) {
 async function runLocalPathInference(modelName, conf, iou, imgsz) {
     const pathValue = els.localPathInput?.value?.trim();
     if (!pathValue) throw new Error('Bitte System-Pfad eingeben');
-    
+
     const formData = new FormData();
-    formData.append('source_type', 'directory');
-    formData.append('source_value', pathValue);
+    formData.append('path', pathValue);
     formData.append('conf', conf);
     formData.append('iou', iou);
     formData.append('imgsz', imgsz);
-    
-    const res = await fetch('/test', { method: 'POST', body: formData });
+
+    const res = await fetch('/test_local_path', { method: 'POST', body: formData });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Pfad-Inferenz fehlgeschlagen');
+
+    // Ergebnis basierend auf Pfad-Typ verarbeiten
+    if (data.path_type === 'directory') {
+        handleBatchResult(data);
+    } else {
+        handleImageResult(data);
+    }
     
-    handleBatchResult(data);
+    log(`${data.files_count || 1} Datei(en) verarbeitet`, 'success');
     return data;
 }
 
@@ -606,7 +674,7 @@ function handleImageResult(data) {
     els.output.textContent = JSON.stringify(data, null, 2);
     
     if (data.image_url) {
-        els.previewBox.innerHTML = `<img src="${data.image_url}?t=${Date.now()}" alt="result" style="width:100%;height:100%;object-fit:contain;">`;
+        els.previewBox.innerHTML = `<img src="${data.image_url}?t=${Date.now()}" alt="result" class="preview-media">`;
         els.previewName.textContent = 'Ergebnis (annotiert)';
     }
     
@@ -631,7 +699,7 @@ function handleBatchResult(data) {
     els.output.textContent = JSON.stringify(data, null, 2);
     
     if (data.annotated_images?.length > 0) {
-        els.previewBox.innerHTML = `<img src="${data.annotated_images[0]}?t=${Date.now()}" alt="batch" style="width:100%;height:100%;object-fit:contain;">`;
+        els.previewBox.innerHTML = `<img src="${data.annotated_images[0]}?t=${Date.now()}" alt="batch" class="preview-media">`;
         els.previewName.textContent = `Batch: ${data.processed_count} Bilder`;
     }
     
@@ -641,7 +709,7 @@ function handleBatchResult(data) {
 function setVideoResult(url) {
     const videoUrl = `${url}?t=${Date.now()}`;
     els.previewBox.innerHTML = `
-        <video controls autoplay playsinline style="width:100%;height:100%;object-fit:contain;">
+        <video controls autoplay playsinline class="preview-media">
             <source src="${videoUrl}" type="video/mp4">
         </video>`;
     els.previewName.textContent = 'Ergebnis-Video';
@@ -763,7 +831,7 @@ function showToast(msg, type = 'success') {
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
     toast.innerHTML = `
-        <span style="font-size:18px;">${icons[type] || icons.success}</span>
+        <span class="toast-icon">${icons[type] || icons.success}</span>
         <span>${msg}</span>
     `;
     stack.appendChild(toast);
@@ -787,13 +855,25 @@ function resetTest() {
 
 function setupKeyboard() {
     document.addEventListener('keydown', e => {
-        // Don't trigger when typing in inputs
-        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-        
+        // Don't trigger when typing in inputs/textareas
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+            // Allow Ctrl+V for path input in local_path mode
+            if ((e.ctrlKey || e.metaKey) && e.key === 'v' && state.mode === 'local_path') {
+                setTimeout(() => {
+                    const input = els.localPathInput;
+                    const text = input?.value?.trim();
+                    if (text && isValidPath(text)) {
+                        showToast(`Pfad eingefügt: ${text}`, 'success');
+                    }
+                }, 100);
+            }
+            return;
+        }
+
         // Ctrl+Enter: Start inference
-        if (e.ctrlKey && e.key === 'Enter') { 
-            e.preventDefault(); 
-            if (!state.processing) runInference(); 
+        if (e.ctrlKey && e.key === 'Enter') {
+            e.preventDefault();
+            if (!state.processing) runInference();
         }
         // Escape: Reset
         if (e.key === 'Escape') {
@@ -860,13 +940,13 @@ async function updateCompareModelList() {
     const models = data.available_models || [];
     
     if (!models.length) { list.innerHTML = '<div class="empty-state">Keine Modelle</div>'; return; }
-    
+
     list.innerHTML = models.map(m => `
-        <label class="model-card" style="cursor:pointer;display:flex;align-items:center;gap:10px;padding:12px;">
-            <input type="checkbox" value="${m}" onchange="toggleCompareModel('${m}')" style="width:18px;height:18px;">
-            <div style="flex:1;">
-                <div style="font-weight:600;font-size:13px;">${m}</div>
-                <div style="font-size:11px;color:var(--text-secondary);">${detectModelType(m)}</div>
+        <label class="model-compare-card">
+            <input type="checkbox" value="${m}" onchange="toggleCompareModel('${m}')" class="model-compare-checkbox">
+            <div class="model-compare-info">
+                <div class="model-compare-name">${m}</div>
+                <div class="model-compare-type">${detectModelType(m)}</div>
             </div>
         </label>`).join('');
 }
@@ -939,72 +1019,90 @@ async function runCompare() {
 
 function displayCompareResults(data) {
     $('compareResults').style.display = 'block';
-    
+
     let html = `
-        <div class="stats-grid" style="margin-bottom:20px;">
-            <div class="stat-card">
-                <div class="stat-value">${data.models_compared}</div>
-                <div class="stat-label">Modelle</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value">${data.total_time}s</div>
-                <div class="stat-label">Gesamtzeit</div>
+        <div class="stats-grid-wrapper">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-value">${data.models_compared}</div>
+                    <div class="stat-label">Modelle</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">${data.total_time}s</div>
+                    <div class="stat-label">Gesamtzeit</div>
+                </div>
             </div>
         </div>
-        <div style="display:grid;gap:12px;">`;
-    
+        <div class="stats-content-grid">`;
+
     data.results.forEach(r => {
         html += r.success
             ? `<div class="model-card">
-                <h4 style="margin:0 0 12px;">${r.model}</h4>
-                <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:12px;">
-                    <div style="text-align:center;padding:10px;background:var(--bg-secondary);border-radius:10px;">
-                        <div style="font-size:20px;font-weight:700;color:var(--accent-primary);">${r.detections_count}</div>
-                        <div style="font-size:11px;color:var(--text-secondary);">Treffer</div>
+                <h4 class="stats-model-title">${r.model}</h4>
+                <div class="stats-detection-grid">
+                    <div class="stat-detection-card">
+                        <div class="stat-detection-value">${r.detections_count}</div>
+                        <div class="stat-detection-label">Treffer</div>
                     </div>
-                    <div style="text-align:center;padding:10px;background:var(--bg-secondary);border-radius:10px;">
-                        <div style="font-size:20px;font-weight:700;color:var(--success);">${r.inference_time}ms</div>
-                        <div style="font-size:11px;color:var(--text-secondary);">Inferenz</div>
+                    <div class="stat-detection-card">
+                        <div class="stat-time-value">${r.inference_time}ms</div>
+                        <div class="stat-detection-label">Inferenz</div>
                     </div>
                 </div>
             </div>`
-            : `<div class="model-card" style="border-color:var(--error);"><div style="color:var(--error);">❌ ${r.model}: ${r.error}</div></div>`;
+            : `<div class="model-card model-error"><div class="model-error-message">❌ ${r.model}: ${r.error}</div></div>`;
     });
-    
+
     html += '</div>';
     $('compareResultsContent').innerHTML = html;
 }
 
 // ==================== HISTORY ====================
-async function loadHistory() {
+async function loadHistory(search = '', source = '') {
     try {
-        const res = await fetch('/history?limit=50');
+        const limit = $('historyLimit')?.value || '50';
+        let url = `/history?limit=${limit}`;
+        if (source) url += `&source_type=${source}`;
+        
+        const res = await fetch(url);
         const data = await res.json();
         const list = $('historyList');
         const empty = $('historyEmpty');
+
+        let history = data.history || [];
         
-        if (!data.history?.length) {
+        // Client-side search filter
+        if (search) {
+            history = history.filter(h => 
+                h.model?.toLowerCase().includes(search) ||
+                h.source_value?.toLowerCase().includes(search) ||
+                h.source_type?.toLowerCase().includes(search)
+            );
+        }
+
+        if (!history.length) {
             list.style.display = 'none';
             empty.style.display = 'block';
             return;
         }
-        
+
         list.style.display = 'grid';
         empty.style.display = 'none';
-        
-        list.innerHTML = data.history.map(entry => {
+
+        list.innerHTML = history.map(entry => {
             const date = new Date(entry.timestamp * 1000).toLocaleString('de-DE');
             return `
-                <div class="model-card" style="padding:16px;">
-                    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
+                <div class="model-card history-card animate-fade-in">
+                    <div class="history-header">
                         <div>
-                            <div style="font-weight:600;font-size:14px;">${entry.model}</div>
-                            <div style="font-size:12px;color:var(--text-secondary);">${entry.source_type} • ${entry.detections_count} Treffer</div>
-                            <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">${date}</div>
+                            <div class="history-model">${entry.model}</div>
+                            <div class="history-meta">${entry.source_type} • ${entry.detections_count} Treffer</div>
+                            <div class="history-date">${date}</div>
                         </div>
-                        <div style="display:flex;gap:8px;">
-                            ${entry.image_url ? `<a href="${entry.image_url}" target="_blank" class="ghost" style="padding:8px 12px;">🖼️</a>` : ''}
-                            ${entry.video_url ? `<a href="${entry.video_url}" target="_blank" class="ghost" style="padding:8px 12px;">🎬</a>` : ''}
+                        <div class="history-actions">
+                            ${entry.image_url ? `<a href="${entry.image_url}" target="_blank" class="ghost" title="Bild anzeigen">🖼️</a>` : ''}
+                            ${entry.video_url ? `<a href="${entry.video_url}" target="_blank" class="ghost" title="Video anzeigen">🎬</a>` : ''}
+                            ${entry.json_url ? `<a href="${entry.json_url}" target="_blank" class="ghost" title="JSON anzeigen">📄</a>` : ''}
                         </div>
                     </div>
                 </div>`;
@@ -1165,25 +1263,27 @@ function displayDatasetResults(data) {
     if (!content) return;
 
     // Ergebnisse anzeigen
-    let html = `<div class="stats-grid" style="margin-bottom:16px;">`;
-    html += `<div class="stat-card"><div class="stat-value">${data.processed_count}</div><div class="stat-label">Bilder</div></div>`;
+    let html = `<div class="stats-grid-wrapper">
+        <div class="stats-grid">
+            <div class="stat-card"><div class="stat-value">${data.processed_count}</div><div class="stat-label">Bilder</div></div>`;
     const totalAnnotations = data.results?.reduce((sum, r) => sum + (r.annotation_count || 0), 0) || 0;
-    html += `<div class="stat-card"><div class="stat-value">${totalAnnotations}</div><div class="stat-label">Annotationen</div></div>`;
-    html += `</div>`;
+    html += `<div class="stat-card"><div class="stat-value">${totalAnnotations}</div><div class="stat-label">Annotationen</div></div>
+        </div>
+    </div>`;
 
     // Annotationen pro Bild
     if (data.results?.length) {
-        html += `<div style="display:grid; gap:12px;">`;
+        html += `<div class="stats-content-grid">`;
         data.results.forEach((r, i) => {
             html += `<div class="model-card">
-                <div style="display:flex; justify-content:space-between; align-items:center;">
+                <div class="annotation-file-header">
                     <div>
-                        <div style="font-weight:600;">${r.filename}</div>
-                        <div style="font-size:12px; color:var(--text-secondary);">${r.annotation_count} Objekte erkannt</div>
+                        <div class="annotation-file-name">${r.filename}</div>
+                        <div class="annotation-count">${r.annotation_count} Objekte erkannt</div>
                     </div>
                     <button class="ghost" onclick="showAnnotationDetails(${i})">📋 Details</button>
                 </div>
-                ${r.annotations?.length ? `<div style="margin-top:8px; display:flex; flex-wrap:wrap; gap:4px;">
+                ${r.annotations?.length ? `<div class="annotation-tags">
                     ${r.annotations.map(a => `<span class="chip">${a.class} (${(a.confidence * 100).toFixed(0)}%)</span>`).join('')}
                 </div>` : ''}
             </div>`;
@@ -1196,8 +1296,8 @@ function displayDatasetResults(data) {
 
     // Preview der annotierten Bilder
     if (data.annotated_images?.length && previewContent) {
-        previewContent.innerHTML = data.annotated_images.map(url => 
-            `<div class="preview-item"><img src="${url}" alt="annotated" style="width:100%; border-radius:8px;"></div>`
+        previewContent.innerHTML = data.annotated_images.map(url =>
+            `<div class="preview-item"><img src="${url}" alt="annotated"></div>`
         ).join('');
         preview.style.display = 'block';
     }
@@ -1462,454 +1562,51 @@ let fewShotSamples = [];
 let currentSampleAnnotations = null;
 let currentSampleImage = null;
 
-function setupFewShotDetection() {
-    setupSampleDropzone();
-    setupAutoDetectDropzone();
-    setupAutoDetectThreshold();
-    updateFewShotStatus();
-}
-
-function setupSampleDropzone() {
-    const dz = $('sampleDropzone');
-    const input = $('sampleImage');
-    if (!dz || !input) return;
-
-    dz.addEventListener('click', e => { e.preventDefault(); input.click(); });
-
-    ['dragenter', 'dragover'].forEach(evt => {
-        dz.addEventListener(evt, e => { e.preventDefault(); e.stopPropagation(); dz.classList.add('dragover'); });
-    });
-    ['dragleave', 'drop'].forEach(evt => {
-        dz.addEventListener(evt, e => { e.preventDefault(); e.stopPropagation(); dz.classList.remove('dragover'); });
-    });
-
-    dz.addEventListener('drop', e => {
-        e.preventDefault();
-        const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
-        if (files.length) handleSampleFile(files[0]);
-    });
-
-    input.addEventListener('change', e => {
-        if (e.target.files.length) handleSampleFile(e.target.files[0]);
-    });
-}
-
 function handleSampleFile(file) {
     currentSampleImage = file;
     $('sampleDropPrompt').textContent = file.name;
     log(`Sample: ${file.name}`, 'info');
     
-    // Manual Annotation Editor öffnen
-    openManualAnnotationEditor(file);
+    // Sample direkt hinzufügen
+    addSampleToFewShot(file);
 }
 
-// ==================== MANUAL ANNOTATION EDITOR - OPTIMIZED ====================
-let manualAnnotations = [];
-let isDrawing = false;
-let drawStart = { x: 0, y: 0 };
-let currentImage = null;
-let canvas = null;
-let ctx = null;
-let quickClasses = ['person', 'car', 'bicycle', 'dog', 'cat', 'object'];
+// ==================== AUTO ANNOTATION ====================
+async function annotateSample() {
+    const prompt = $('samplePrompt')?.value?.trim();
+    if (!prompt) { showToast('Bitte Prompt eingeben', 'error'); return; }
+    if (!currentSampleImage) { showToast('Bitte Sample-Bild auswählen', 'error'); return; }
 
-// Tastenkürzel initialisieren
-document.addEventListener('keydown', function(e) {
-    // Nur wenn Annotation Editor sichtbar ist
-    if ($('manualAnnotationEditor')?.style?.display === 'none') return;
-    
-    // Tastenkürzel
-    if (e.key === 'd' || e.key === 'D') {
-        e.preventDefault();
-        toggleDrawing();
-    } else if (e.key === 'z' || e.key === 'Z') {
-        if (e.ctrlKey || e.metaKey) {
-            e.preventDefault();
-            undoLastAnnotation();
-        }
-    } else if (e.key === 'Escape') {
-        e.preventDefault();
-        cancelDrawing();
-    } else if (e.key >= '1' && e.key <= '6') {
-        e.preventDefault();
-        setClass(quickClasses[parseInt(e.key) - 1]);
-    } else if (e.key === 'Delete' || e.key === 'Backspace') {
-        if (manualAnnotations.length > 0) {
-            e.preventDefault();
-            undoLastAnnotation();
-        }
-    } else if (e.key === 's' || e.key === 'S') {
-        if (e.ctrlKey || e.metaKey) {
-            e.preventDefault();
-            saveManualAnnotations();
-        }
-    }
-});
+    const btn = $('annotateSampleBtn');
+    btn.disabled = true;
+    btn.textContent = '⏳...';
 
-function openManualAnnotationEditor(file) {
-    const editorEl = $('manualAnnotationEditor');
-    if (!editorEl) return;
-    
-    editorEl.style.display = 'block';
-    
-    // Use AnnEditor
-    if (window.AnnEditor) {
-        window.AnnEditor.loadImage(file).then(() => {
-            window.AnnEditor.setMode('draw');
-            window.AnnEditor.setClass('object');
-        });
-    }
-}
+    try {
+        const formData = new FormData();
+        formData.append('prompt', prompt);
+        formData.append('box_threshold', 0.25);
+        formData.append('image', currentSampleImage);
 
-function initCanvas() {
-    canvas = $('annotationCanvas');
-    if (!canvas) return;
-    
-    ctx = canvas.getContext('2d');
-    
-    // Canvas Größe an Bild anpassen (max 600px width)
-    const maxWidth = 600;
-    const scale = Math.min(1, maxWidth / currentImage.width);
-    canvas.width = currentImage.width * scale;
-    canvas.height = currentImage.height * scale;
-    
-    // Bild zeichnen
-    redrawCanvas();
-    updateCanvasStatus('🖱️ Klicken & ziehen zum Zeichnen');
-    
-    // Event Listener für Drawing
-    canvas.addEventListener('mousedown', startBox);
-    canvas.addEventListener('mousemove', drawBox);
-    canvas.addEventListener('mouseup', endBox);
-    canvas.addEventListener('mouseleave', endBox);
-    canvas.addEventListener('mouseenter', () => canvas.classList.add('active'));
-    canvas.addEventListener('mouseleave', () => canvas.classList.remove('active'));
-    
-    // Touch Support
-    canvas.addEventListener('touchstart', handleTouchStart);
-    canvas.addEventListener('touchmove', handleTouchMove);
-    canvas.addEventListener('touchend', handleTouchEnd);
-}
+        const res = await fetch('/dataset/annotate', { method: 'POST', body: formData });
+        const data = await res.json();
 
-function updateCanvasStatus(message, isRecording = false) {
-    const overlay = $('canvasOverlay');
-    const status = $('canvasStatus');
-    if (overlay && status) {
-        overlay.style.display = 'flex';
-        overlay.classList.add('show');
-        status.textContent = message;
-        overlay.classList.toggle('recording', isRecording);
-    }
-}
+        if (!res.ok) throw new Error(data.error);
 
-function toggleDrawing() {
-    if (isDrawing) {
-        cancelDrawing();
-    } else {
-        startDrawing();
-    }
-}
+        currentSampleAnnotations = data.annotations || [];
 
-function startDrawing() {
-    isDrawing = true;
-    const btn = $('drawBtn');
-    if (btn) {
-        btn.textContent = '⏹ Stop';
-        btn.style.background = 'var(--error)';
-    }
-    canvas?.classList.add('drawing');
-    updateCanvasStatus('✏️ Zeichne Box... (Esc zum Stop)', true);
-    
-    // Auto-fokus auf Canvas
-    canvas?.focus();
-}
-
-function cancelDrawing() {
-    isDrawing = false;
-    const btn = $('drawBtn');
-    if (btn) {
-        btn.textContent = '✏️ Zeichnen';
-        btn.style.background = '';
-    }
-    canvas?.classList.remove('drawing');
-    updateCanvasStatus('🖱️ Klicken & ziehen zum Zeichnen');
-}
-
-function setClass(className) {
-    const input = $('classNameInput');
-    if (input) {
-        input.value = className;
-        input.focus();
-    }
-    
-    // Aktuelle Klasse im Display anzeigen
-    const display = $('currentClassDisplay');
-    if (display) {
-        display.textContent = className;
-    }
-    
-    // Quick Class Buttons aktualisieren
-    document.querySelectorAll('.quick-class-btn').forEach(btn => {
-        btn.classList.remove('active');
-        if (btn.dataset?.class === className) {
-            btn.classList.add('active');
-        }
-    });
-}
-
-function redrawCanvas() {
-    if (!ctx || !currentImage) return;
-    
-    // Bild zeichnen
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(currentImage, 0, 0, canvas.width, canvas.height);
-    
-    // Annotationen zeichnen
-    manualAnnotations.forEach((ann, index) => {
-        const { x, y, width, height } = ann;
-        
-        // Box zeichnen
-        ctx.strokeStyle = '#00ff00';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(x, y, width, height);
-        
-        // Label Hintergrund
-        ctx.fillStyle = 'rgba(0, 255, 0, 0.7)';
-        const labelHeight = 18;
-        ctx.fillRect(x, y - labelHeight, Math.max(80, ctx.measureText(ann.class).width + 10), labelHeight);
-        
-        // Label Text
-        ctx.fillStyle = '#000000';
-        ctx.font = '11px Inter, sans-serif';
-        ctx.fillText(ann.class, x + 4, y - 4);
-        
-        // Index zeichnen
-        ctx.fillStyle = '#00ff00';
-        ctx.fillRect(x - 2, y - 2, 16, 16);
-        ctx.fillStyle = '#000000';
-        ctx.fillText(index.toString(), x + 4, y + 9);
-    });
-}
-
-function startBox(e) {
-    if (!isDrawing) return;
-    
-    const rect = canvas.getBoundingClientRect();
-    drawStart = {
-        x: e.clientX - rect.left,
-        y: e.clientY - rect.top
-    };
-}
-
-function drawBox(e) {
-    if (!isDrawing) return;
-    
-    const rect = canvas.getBoundingClientRect();
-    const currentX = e.clientX - rect.left;
-    const currentY = e.clientY - rect.top;
-    
-    // Canvas neu zeichnen (ohne aktuelle Box)
-    redrawCanvas();
-    
-    // Aktuelle Box zeichnen (Vorschau)
-    const width = currentX - drawStart.x;
-    const height = currentY - drawStart.y;
-    
-    ctx.strokeStyle = '#00ffff';
-    ctx.lineWidth = 2;
-    ctx.setLineDash([5, 3]);
-    ctx.strokeRect(drawStart.x, drawStart.y, width, height);
-    ctx.setLineDash([]);
-}
-
-function endBox(e) {
-    if (!isDrawing) return;
-    
-    const rect = canvas.getBoundingClientRect();
-    const endX = e.clientX - rect.left;
-    const endY = e.clientY - rect.top;
-    
-    // Box normalisieren (negative Width/Height korrigieren)
-    let x = Math.min(drawStart.x, endX);
-    let y = Math.min(drawStart.y, endY);
-    let width = Math.abs(endX - drawStart.x);
-    let height = Math.abs(endY - drawStart.y);
-    
-    // Minimale Größe prüfen
-    if (width < 10 || height < 10) {
-        redrawCanvas();
-        return;
-    }
-    
-    // Annotation speichern
-    const className = $('classNameInput')?.value?.trim() || 'object';
-    manualAnnotations.push({
-        class: className,
-        x: x,
-        y: y,
-        width: width,
-        height: height,
-        bbox_normalized: [
-            x / canvas.width,
-            y / canvas.height,
-            (x + width) / canvas.width,
-            (y + height) / canvas.height
-        ]
-    });
-    
-    redrawCanvas();
-    updateAnnotationList();
-    $('saveAnnotationsBtn').disabled = manualAnnotations.length === 0;
-}
-
-function handleTouchStart(e) {
-    e.preventDefault();
-    const touch = e.touches[0];
-    const mouseEvent = new MouseEvent('mousedown', {
-        clientX: touch.clientX,
-        clientY: touch.clientY
-    });
-    canvas.dispatchEvent(mouseEvent);
-}
-
-function handleTouchMove(e) {
-    e.preventDefault();
-    const touch = e.touches[0];
-    const mouseEvent = new MouseEvent('mousemove', {
-        clientX: touch.clientX,
-        clientY: touch.clientY
-    });
-    canvas.dispatchEvent(mouseEvent);
-}
-
-function handleTouchEnd(e) {
-    e.preventDefault();
-    const mouseEvent = new MouseEvent('mouseup', {});
-    canvas.dispatchEvent(mouseEvent);
-}
-
-function startDrawing() {
-    isDrawing = true;
-    $('drawBtn').textContent = '⏹ Stop';
-    $('drawBtn').classList.add('active');
-    canvas.style.cursor = 'crosshair';
-}
-
-function cancelDrawing() {
-    isDrawing = false;
-    $('drawBtn').textContent = '✏️ Zeichnen';
-    $('drawBtn').classList.remove('active');
-    canvas.style.cursor = 'default';
-}
-
-function undoLastAnnotation() {
-    if (manualAnnotations.length > 0) {
-        manualAnnotations.pop();
-        redrawCanvas();
-        updateAnnotationList();
-        $('saveAnnotationsBtn').disabled = manualAnnotations.length === 0;
-    }
-}
-
-function deleteAnnotation(index) {
-    manualAnnotations.splice(index, 1);
-    redrawCanvas();
-    updateAnnotationList();
-    $('saveAnnotationsBtn').disabled = manualAnnotations.length === 0;
-}
-
-function updateAnnotationList() {
-    const list = $('annotationList');
-    if (!list) return;
-
-    if (manualAnnotations.length === 0) {
-        list.innerHTML = '<div class="annotation-help">Keine Annotationen. Zeichne Boxen mit der Maus.</div>';
-        updateAnnotationCount();
-        return;
-    }
-
-    let html = '<div class="annotation-help">' + manualAnnotations.length + ' Annotationen:</div>';
-    manualAnnotations.forEach((ann, index) => {
-        html += `
-            <div class="annotation-item">
-                <div style="display:flex; align-items:center; gap:8px;">
-                    <span class="class-badge">${ann.class}</span>
-                    <span style="color:var(--text-secondary); font-size:10px;">
-                        [${Math.round(ann.bbox_normalized[0]*100)}, ${Math.round(ann.bbox_normalized[1]*100)} - 
-                         ${Math.round(ann.bbox_normalized[2]*100)}, ${Math.round(ann.bbox_normalized[3]*100)}]
-                    </span>
-                </div>
-                <button class="delete-btn" onclick="deleteAnnotation(${index})">✕</button>
-            </div>
-        `;
-    });
-    list.innerHTML = html;
-    updateAnnotationCount();
-}
-
-function updateAnnotationCount() {
-    const countEl = $('annotationCount');
-    if (countEl) {
-        countEl.textContent = manualAnnotations.length;
-    }
-    $('saveAnnotationsBtn').disabled = manualAnnotations.length === 0;
-}
-
-function clearAllAnnotations() {
-    if (manualAnnotations.length === 0) return;
-    if (!confirm('Alle Annotationen löschen?')) return;
-    
-    manualAnnotations = [];
-    redrawCanvas();
-    updateAnnotationList();
-    updateAnnotationCount();
-    showToast('Alle Annotationen gelöscht', 'success');
-}
-
-function saveManualAnnotations() {
-    // Use professional editor if available
-    if (window.AnnEditor && window.AnnEditor.annotations?.length > 0) {
-        currentSampleAnnotations = window.AnnEditor.getAnnotations();
-        
-        // Editor schließen
-        $('manualAnnotationEditor').style.display = 'none';
-        
-        // Vorschau anzeigen
+        // Vorschau der Annotationen
         showSampleAnnotations(currentSampleAnnotations);
-        
-        // Hinzufügen-Button aktivieren
-        $('addSampleBtn').disabled = false;
-        
-        showToast(`${currentSampleAnnotations.length} Annotationen gespeichert`, 'success');
-        return;
-    }
-    
-    // Fallback für alten Editor
-    if (manualAnnotations.length === 0) return;
 
-    // Annotationen für Few-Shot konvertieren
-    currentSampleAnnotations = manualAnnotations.map(ann => ({
-        class: ann.class,
-        bbox: [
-            ann.bbox_normalized[0] * currentImage.width,
-            ann.bbox_normalized[1] * currentImage.height,
-            ann.bbox_normalized[2] * currentImage.width,
-            ann.bbox_normalized[3] * currentImage.height
-        ],
-        bbox_normalized: ann.bbox_normalized,
-        confidence: 1.0
-    }));
-    
-    // Editor schließen
-    cancelDrawing();
-    $('manualAnnotationEditor').style.display = 'none';
-    
-    // Vorschau anzeigen
-    showSampleAnnotations(currentSampleAnnotations);
-    
-    // Hinzufügen-Button aktivieren
-    $('addSampleBtn').disabled = false;
-    
-    showToast(`${currentSampleAnnotations.length} Annotationen gespeichert`, 'success');
+        // Hinzufügen-Button aktivieren
+        $('addSampleBtn').disabled = currentSampleAnnotations.length === 0;
+
+        showToast(`${currentSampleAnnotations.length} Objekte annotiert`, 'success');
+    } catch (err) {
+        showToast(err.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '🏷️ Sample annotieren';
+    }
 }
 
 function setupFewShotDetection() {
@@ -1985,43 +1682,6 @@ function setupAutoDetectThreshold() {
         thresh.addEventListener('input', () => {
             $('autoDetectThresholdValue').textContent = thresh.value;
         });
-    }
-}
-
-async function annotateSample() {
-    const prompt = $('samplePrompt')?.value?.trim();
-    if (!prompt) { showToast('Bitte Prompt eingeben', 'error'); return; }
-    if (!currentSampleImage) { showToast('Bitte Sample-Bild auswählen', 'error'); return; }
-
-    const btn = $('annotateSampleBtn');
-    btn.disabled = true;
-    btn.textContent = '⏳...';
-
-    try {
-        const formData = new FormData();
-        formData.append('prompt', prompt);
-        formData.append('box_threshold', 0.25);
-        formData.append('image', currentSampleImage);
-
-        const res = await fetch('/dataset/annotate', { method: 'POST', body: formData });
-        const data = await res.json();
-
-        if (!res.ok) throw new Error(data.error);
-
-        currentSampleAnnotations = data.annotations || [];
-        
-        // Vorschau der Annotationen
-        showSampleAnnotations(currentSampleAnnotations);
-        
-        // Hinzufügen-Button aktivieren
-        $('addSampleBtn').disabled = currentSampleAnnotations.length === 0;
-        
-        showToast(`${currentSampleAnnotations.length} Objekte annotiert`, 'success');
-    } catch (err) {
-        showToast(err.message, 'error');
-    } finally {
-        btn.disabled = false;
-        btn.textContent = '🏷️ Sample annotieren';
     }
 }
 
@@ -2222,16 +1882,6 @@ window.addSampleToFewShot = addSampleToFewShot;
 window.runAutoDetection = runAutoDetection;
 window.clearFewShot = clearFewShot;
 
-// Manual Annotation exports
-window.startDrawing = startDrawing;
-window.cancelDrawing = cancelDrawing;
-window.toggleDrawing = toggleDrawing;
-window.undoLastAnnotation = undoLastAnnotation;
-window.deleteAnnotation = deleteAnnotation;
-window.clearAllAnnotations = clearAllAnnotations;
-window.saveManualAnnotations = saveManualAnnotations;
-window.setClass = setClass;
-
 // ==================== MODEL DOWNLOAD ====================
 let modelCatalog = [];
 let currentFilter = 'all';
@@ -2401,4 +2051,68 @@ async function downloadModel(modelName) {
 function getFilteredModels() {
     if (currentFilter === 'all') return modelCatalog;
     return modelCatalog.filter(m => m.version === currentFilter);
+}
+
+// ==================== SETTINGS AUTO-SAVE ====================
+function loadSettings() {
+    try {
+        const saved = localStorage.getItem('yolo_settings');
+        if (saved) {
+            const settings = JSON.parse(saved);
+            Object.assign(state.settings, settings);
+            
+            // Apply settings
+            if (settings.conf && els.confThreshold) {
+                els.confThreshold.value = settings.conf;
+            }
+            if (settings.iou && els.iouThreshold) {
+                els.iouThreshold.value = settings.iou;
+            }
+            if (settings.imgsz && els.imgSize) {
+                els.imgSize.value = settings.imgsz;
+            }
+            if (settings.saveResults !== undefined && els.saveResults) {
+                els.saveResults.checked = settings.saveResults;
+            }
+            if (settings.showLabels !== undefined && els.showLabels) {
+                els.showLabels.checked = settings.showLabels;
+            }
+            
+            setupParamLabels();
+            showToast('Einstellungen geladen', 'info');
+        }
+    } catch (err) {
+        console.error('Failed to load settings:', err);
+    }
+}
+
+function setupSettingsAutoSave() {
+    // Auto-save on parameter changes
+    [els.confThreshold, els.iouThreshold, els.imgSize].forEach(el => {
+        el?.addEventListener('change', saveSettings);
+    });
+    
+    [els.saveResults, els.showLabels].forEach(el => {
+        el?.addEventListener('change', saveSettings);
+    });
+}
+
+function saveSettings() {
+    try {
+        state.settings.conf = els.confThreshold?.value || 0.25;
+        state.settings.iou = els.iouThreshold?.value || 0.45;
+        state.settings.imgsz = els.imgSize?.value || 640;
+        state.settings.saveResults = els.saveResults?.checked ?? true;
+        state.settings.showLabels = els.showLabels?.checked ?? true;
+        
+        localStorage.setItem('yolo_settings', JSON.stringify(state.settings));
+        
+        // Show save notification (debounced)
+        clearTimeout(window.settingsSaveTimeout);
+        window.settingsSaveTimeout = setTimeout(() => {
+            showToast('Einstellungen gespeichert', 'success');
+        }, 500);
+    } catch (err) {
+        console.error('Failed to save settings:', err);
+    }
 }

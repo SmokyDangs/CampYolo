@@ -8,7 +8,6 @@
     <title>YOLO Vision 2026</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
     <script src="{{ url_for('static', filename='training.js') }}" defer></script>
-    <script src="{{ url_for('static', filename='annotation-editor.js') }}" defer></script>
     <script src="{{ url_for('static', filename='app.js') }}" defer></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -17,7 +16,7 @@
 <body>
     <!-- Theme Toggle Button -->
     <button class="theme-toggle" id="themeToggle" aria-label="Theme umschalten" title="Dark/Light Mode (T)">
-        <svg class="sun-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="display:none;">
+        <svg class="sun-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path>
         </svg>
         <svg class="moon-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -42,8 +41,8 @@
                 </button>
                 <button data-target="dataset" role="tab" aria-selected="false">
                     <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"></path></svg>
-                    Dataset
-                    <span class="chip" style="margin-left:6px;">NEW</span>
+                    Dataset verwalten
+                    <span class="chip chip-new">NEW</span>
                 </button>
                 <button data-target="training" role="tab" aria-selected="false">
                     <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
@@ -66,12 +65,12 @@
                     Einstellungen
                 </button>
             </nav>
-            <div style="margin-top:auto;">
-                <div class="pill" id="activeModelPill" style="display:none;" aria-live="polite">
+            <div class="sidebar-footer">
+                <div class="pill" id="activeModelPill" aria-live="polite">
                     <span class="dot"></span>
                     <span id="activeModelLabel"></span>
                 </div>
-                <div class="kbd-hint" style="margin-top:12px; opacity:0.6;">
+                <div class="kbd-hint">
                     <span class="kbd">?</span> Shortcuts
                 </div>
             </div>
@@ -89,14 +88,14 @@
                         <h3>Modelle</h3>
                         <p class="subtitle">Verfügbare YOLO-Modelle</p>
                     </div>
-                    <div style="display:flex; gap:8px;">
+                    <div class="section-actions">
                         <button class="ghost" onclick="toggleModelCatalog()">📥 Modell-Katalog</button>
                         <button class="action" onclick="updateModelList()">Aktualisieren</button>
                     </div>
                 </div>
                 
                 <!-- Model Catalog Download Section -->
-                <div id="modelCatalog" class="model-catalog" style="display:none;">
+                <div id="modelCatalog" class="model-catalog">
                     <div class="catalog-header">
                         <h4>📦 YOLO Modell-Katalog</h4>
                         <div class="catalog-filters">
@@ -197,12 +196,23 @@
                             </div>
                         </div>
 
-                        <div id="localPathInputGroup" class="input-group" style="display:none;">
-                            <label class="field-label">Lokaler System-Pfad (Linux/Windows)</label>
-                            <div class="input-row">
-                                <input type="text" id="localPathInput" placeholder="C:\Users\Name\Pictures oder /home/user/pics" style="flex:1;">
+                        <div id="localPathInputGroup" class="input-group">
+                            <label class="field-label">Lokaler Pfad (Windows, Linux, macOS)</label>
+                            <div class="path-input-wrapper">
+                                <input type="text" id="localPathInput" class="path-input" placeholder="C:\Users\Name\Pictures oder /home/user/pics" autocomplete="off">
+                                <button class="btn-icon" onclick="pastePath()" title="Pfad aus Zwischenablage einfügen">📋</button>
+                                <button class="btn-icon" onclick="browsePath()" title="Datei auswählen">📁</button>
                             </div>
-                            <p class="muted" style="font-size:10px; margin-top:4px;">Nur verfügbar, wenn der Server lokal läuft.</p>
+                            <div class="path-help">
+                                <span>💡</span>
+                                <span>Pfad aus Dateiexplorer kopieren und mit Strg+V einfügen oder 📋 klicken</span>
+                            </div>
+                            <div class="path-examples">
+                                <span>Beispiele:</span>
+                                <code>C:\Users\Name\Bilder\foto.jpg</code>
+                                <code>/home/user/Pictures/foto.jpg</code>
+                                <code>/Users/Name/Pictures/</code>
+                            </div>
                         </div>
 
                         <div id="streamInputGroup" class="input-group" style="display:none;">
@@ -282,38 +292,37 @@
             <section id="dataset" class="card tab-section">
                 <div class="section-header">
                     <div>
-                        <h3>Dataset erstellen</h3>
+                        <h3>Dataset verwalten</h3>
                         <p class="subtitle">Automatische Annotationen mit Grounding DINO oder Few-Shot Learning</p>
                     </div>
-                    <div class="pill" id="datasetStatusPill" style="display:none;">
+                    <div class="pill" id="datasetStatusPill">
                         <span class="dot"></span>
                         <span id="datasetStatusLabel">Bereit</span>
                     </div>
                 </div>
 
                 <!-- Few-Shot Auto-Detection Section -->
-                <!-- Few-Shot Auto-Detection Section - Optimized UI -->
-                <div class="few-shot-section" style="margin-bottom:16px;">
-                    <div class="section-header" style="margin-bottom:16px;">
-                        <div style="display:flex; align-items:center; gap:12px;">
-                            <div style="width:40px; height:40px; background:linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius:10px; display:grid; place-items:center; font-size:20px;">🎯</div>
-                            <div>
-                                <h3 style="font-size:16px; font-weight:700; margin:0;">Few-Shot Auto-Detection</h3>
-                                <p class="subtitle" style="margin:4px 0 0; font-size:12px;">Lerne aus 2-3 Beispielbildern und label automatisch ganze Datensätze</p>
+                <div class="few-shot-section">
+                    <div class="section-header">
+                        <div class="few-shot-header">
+                            <div class="few-shot-icon">🎯</div>
+                            <div class="few-shot-title">
+                                <h3>Few-Shot Auto-Detection</h3>
+                                <p class="subtitle">Lerne aus 2-3 Beispielbildern und label automatisch ganze Datensätze</p>
                             </div>
                         </div>
-                        <div class="pill" id="fewshotStatusPill" style="background:rgba(245,158,11,0.15); color:var(--warning); border:1px solid rgba(245,158,11,0.3); padding:6px 12px;">
+                        <div class="pill" id="fewshotStatusPill">
                             <span class="dot"></span>
                             <span id="fewshotStatusText">Keine Samples</span>
                         </div>
                     </div>
 
-                    <div class="few-shot-grid" style="display:grid; grid-template-columns:1fr 1fr; gap:20px;">
+                    <div class="few-shot-grid">
                         <!-- Linke Spalte - Annotation -->
                         <div class="annotation-column">
                             <div class="column-header">
                                 <span class="step-badge">1</span>
-                                <h4 style="font-size:13px; font-weight:600; margin:0;">Beispiele annotieren</h4>
+                                <h4>Beispiele annotieren</h4>
                             </div>
                             
                             <!-- Upload Dropzone -->
@@ -329,77 +338,7 @@
                                     <p class="dropzone-hint">Unterstützt: JPG, PNG, WebP</p>
                                 </div>
                             </div>
-                            
-                            <!-- Manual Annotation Editor - Professional -->
-                            <div id="manualAnnotationEditor" class="annotation-editor card glass-strong" style="display:none; position:fixed; inset:20px; z-index:1000; margin:0; padding:24px; display:flex; flex-direction:column;">
-                                <!-- Editor Header -->
-                                <div class="modal-header" style="margin-bottom:20px;">
-                                    <h3 class="modal-title">🎨 Manueller Annotation-Editor</h3>
-                                    <button class="modal-close" onclick="$('manualAnnotationEditor').style.display='none'" aria-label="Schließen">✕</button>
-                                </div>
-                                
-                                <div style="display:grid; grid-template-columns: 1fr 280px; gap:24px; flex:1; overflow:hidden;">
-                                    <!-- Left Side: Canvas Area -->
-                                    <div style="display:flex; flex-direction:column; gap:16px; overflow:hidden;">
-                                        <!-- Editor Toolbar -->
-                                        <div class="editor-toolbar card glass" style="padding:12px; margin:0; display:flex; align-items:center; gap:20px; flex-wrap:wrap;">
-                                            <div class="toolbar-section">
-                                                <span class="toolbar-label">Modus:</span>
-                                                <div class="source-tabs" style="padding:4px; margin:0;">
-                                                    <button class="source-tab active" data-mode="draw" onclick="setEditorMode('draw')" title="Boxen zeichnen (D)">✏️ Draw</button>
-                                                    <button class="source-tab" data-mode="select" onclick="setEditorMode('select')" title="Boxen auswählen (V)">🖱️ Select</button>
-                                                </div>
-                                            </div>
-                                            
-                                            <div class="toolbar-section" style="flex:1;">
-                                                <span class="toolbar-label">Klasse:</span>
-                                                <input type="text" id="classNameInput" placeholder="Klassenname" class="class-input" style="width:100%; max-width:200px; margin-left:8px;">
-                                            </div>
-                                            
-                                            <div class="toolbar-section toolbar-actions" style="display:flex; gap:8px;">
-                                                <button class="ghost" onclick="undo()" title="Rückgängig (Strg+Z)">↩️</button>
-                                                <button class="ghost" onclick="deleteSelected()" title="Löschen (Entf)">🗑️</button>
-                                                <button class="ghost" onclick="clearAllAnnotations()" title="Alle löschen">⊗</button>
-                                            </div>
-                                        </div>
 
-                                        <!-- Canvas Scroll Area -->
-                                        <div class="editor-canvas-area card glass" style="flex:1; margin:0; overflow:auto; display:grid; place-items:center; background:#000;">
-                                            <div class="canvas-container" style="position:relative;">
-                                                <canvas id="annotationCanvas"></canvas>
-                                                <div id="canvasOverlay" class="canvas-overlay" style="pointer-events:none;">
-                                                    <span id="canvasStatus" class="overlay-text">Klicken & ziehen zum Zeichnen</span>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <!-- Right Side: Sidebar -->
-                                    <div style="display:flex; flex-direction:column; gap:16px; overflow:hidden;">
-                                        <div class="card glass" style="padding:16px; margin:0; flex:1; display:flex; flex-direction:column; overflow:hidden;">
-                                            <h4 style="font-size:14px; margin-bottom:12px;">📑 Annotationen (<span id="annotationCount">0</span>)</h4>
-                                            <div id="annotationList" style="flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:8px; padding-right:4px;">
-                                                <div class="empty-state">Keine Annotationen</div>
-                                            </div>
-                                        </div>
-
-                                        <div class="card glass" style="padding:16px; margin:0;">
-                                            <h4 style="font-size:14px; margin-bottom:12px;">⌨️ Shortcuts</h4>
-                                            <div style="font-size:11px; display:grid; gap:8px;">
-                                                <div style="display:flex; justify-content:space-between;"><span>Zeichnen</span> <kbd>D</kbd></div>
-                                                <div style="display:flex; justify-content:space-between;"><span>Auswählen</span> <kbd>V</kbd></div>
-                                                <div style="display:flex; justify-content:space-between;"><span>Löschen</span> <kbd>Entf</kbd></div>
-                                                <div style="display:flex; justify-content:space-between;"><span>Undo</span> <kbd>Strg+Z</kbd></div>
-                                            </div>
-                                        </div>
-
-                                        <button class="action btn-block" onclick="saveManualAnnotations()" id="saveAnnotationsBtn" disabled style="height:50px; font-size:15px;">
-                                            💾 Übernehmen
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                            
                             <!-- Auto Annotation -->
                             <div class="auto-annotation-section">
                                 <div class="section-divider">
@@ -429,9 +368,9 @@
                         <div class="detection-column">
                             <div class="column-header">
                                 <span class="step-badge step-2">2</span>
-                                <h4 style="font-size:13px; font-weight:600; margin:0;">Auto-Detection starten</h4>
+                                <h4>Auto-Detection starten</h4>
                             </div>
-                            
+
                             <div class="dropzone modern-dropzone" id="autoDetectDropzone">
                                 <input type="file" id="autoDetectImages" accept="image/*" multiple hidden>
                                 <div class="dropzone-content">
@@ -444,7 +383,7 @@
                                     <p class="dropzone-hint">Mehrere Bilder auswählen möglich</p>
                                 </div>
                             </div>
-                            
+
                             <div class="detection-controls">
                                 <div class="control-group">
                                     <label class="control-label">
@@ -462,12 +401,12 @@
                                     <span class="btn-text">Auto-Detection starten</span>
                                 </button>
                             </div>
-                            
-                            <button class="btn btn-ghost btn-block" onclick="clearFewShot()" style="margin-top:8px;">
+
+                            <button class="btn btn-ghost btn-block btn-clear-samples" onclick="clearFewShot()">
                                 <span class="btn-icon">🗑️</span>
                                 <span class="btn-text">Alle Samples löschen</span>
                             </button>
-                            
+
                             <!-- Results -->
                             <div id="autoDetectResults" class="results-section" style="display:none;">
                                 <h4 class="results-title">📊 Auto-Detection Ergebnisse</h4>
@@ -480,17 +419,17 @@
                 <div class="dataset-container">
                     <div class="dataset-sidebar">
                         <div class="card-section">
-                            <h4 style="margin:0 0 12px;">📝 Text-Prompt</h4>
+                            <h4>📝 Text-Prompt</h4>
                             <label class="field-label">Was soll erkannt werden?</label>
                             <textarea id="datasetPrompt" class="prompt-input" placeholder="z.B. person, car, dog, helmet..." rows="3"></textarea>
-                            <div style="display:flex; gap:8px; margin-top:8px;">
-                                <button class="action" onclick="loadTemplates()" style="flex:1;">📋 Vorlagen laden</button>
+                            <div class="button-group">
+                                <button class="action" onclick="loadTemplates()">📋 Vorlagen laden</button>
                                 <button class="ghost" onclick="clearDataset()">↺ Reset</button>
                             </div>
                         </div>
 
                         <div class="card-section">
-                            <h4 style="margin:0 0 12px;">⚙️ Parameter</h4>
+                            <h4>⚙️ Parameter</h4>
                             <div class="params-grid">
                                 <div class="param-item">
                                     <label>Box Threshold: <span id="boxThresholdValue">0.35</span></label>
@@ -757,14 +696,52 @@
                         <h3>Verlauf</h3>
                         <p class="subtitle">Letzte Inferenzen</p>
                     </div>
-                    <div style="display:flex; gap:6px;">
-                        <button class="ghost" onclick="loadHistory()">↻</button>
-                        <button class="ghost" onclick="clearHistory()">🗑</button>
-                        <button class="action" onclick="exportHistory('json')">Export</button>
+                    <div class="section-actions">
+                        <button class="ghost" onclick="toggleHistoryFilter()" title="Filter">🔍</button>
+                        <button class="ghost" onclick="loadHistory()" title="Aktualisieren">↻</button>
+                        <button class="ghost" onclick="clearHistory()" title="Löschen">🗑</button>
                     </div>
                 </div>
-                <div id="historyList" style="display:grid; gap:8px;"></div>
-                <div id="historyEmpty" class="empty-state" style="display:none;">
+                
+                <!-- History Filter Panel -->
+                <div id="historyFilterPanel" class="filter-panel" style="display:none;">
+                    <div class="filter-grid">
+                        <div>
+                            <label class="field-label">Suche</label>
+                            <input type="text" id="historySearch" class="filter-input" placeholder="Modell, Datei...">
+                        </div>
+                        <div>
+                            <label class="field-label">Quelle</label>
+                            <select id="historySource" class="filter-select">
+                                <option value="">Alle</option>
+                                <option value="image">Bild</option>
+                                <option value="video">Video</option>
+                                <option value="webcam">Webcam</option>
+                                <option value="url">URL</option>
+                                <option value="batch">Batch</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="field-label">Limit</label>
+                            <select id="historyLimit" class="filter-select" onchange="loadHistory()">
+                                <option value="20">20</option>
+                                <option value="50" selected>50</option>
+                                <option value="100">100</option>
+                                <option value="500">500</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="filter-actions">
+                        <button class="action" onclick="applyHistoryFilter()">Anwenden</button>
+                        <button class="ghost" onclick="clearHistoryFilter()">Reset</button>
+                    </div>
+                </div>
+                
+                <div class="history-actions-bar">
+                    <button class="action" onclick="exportHistory('json')">📥 Export</button>
+                </div>
+                <div id="historyList" class="history-list"></div>
+                <div id="historyEmpty" class="empty-state">
                     <svg class="empty-state-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                     </svg>
@@ -872,6 +849,7 @@
                 <button class="modal-close" onclick="toggleShortcutsModal()" aria-label="Schließen">✕</button>
             </div>
             <div class="shortcut-list">
+                <div class="shortcut-category">Allgemein</div>
                 <div class="shortcut-item">
                     <span class="shortcut-action">Inferenz starten</span>
                     <div class="shortcut-keys"><kbd>Strg</kbd><kbd>Enter</kbd></div>
@@ -891,6 +869,32 @@
                 <div class="shortcut-item">
                     <span class="shortcut-action">Modell neu laden</span>
                     <div class="shortcut-keys"><kbd>F5</kbd></div>
+                </div>
+                
+                <div class="shortcut-category">Navigation</div>
+                <div class="shortcut-item">
+                    <span class="shortcut-action">Modelle</span>
+                    <div class="shortcut-keys"><kbd>Strg</kbd><kbd>1</kbd></div>
+                </div>
+                <div class="shortcut-item">
+                    <span class="shortcut-action">Testing</span>
+                    <div class="shortcut-keys"><kbd>Strg</kbd><kbd>2</kbd></div>
+                </div>
+                <div class="shortcut-item">
+                    <span class="shortcut-action">Dataset</span>
+                    <div class="shortcut-keys"><kbd>Strg</kbd><kbd>3</kbd></div>
+                </div>
+                <div class="shortcut-item">
+                    <span class="shortcut-action">Training</span>
+                    <div class="shortcut-keys"><kbd>Strg</kbd><kbd>4</kbd></div>
+                </div>
+                <div class="shortcut-item">
+                    <span class="shortcut-action">Vergleich</span>
+                    <div class="shortcut-keys"><kbd>Strg</kbd><kbd>5</kbd></div>
+                </div>
+                <div class="shortcut-item">
+                    <span class="shortcut-action">Verlauf</span>
+                    <div class="shortcut-keys"><kbd>Strg</kbd><kbd>6</kbd></div>
                 </div>
             </div>
         </div>
@@ -945,7 +949,7 @@
             handle(e) {
                 // Don't trigger when typing in inputs
                 if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-                
+
                 // Theme toggle: T
                 if (e.key === 't' || e.key === 'T') {
                     e.preventDefault();
@@ -956,6 +960,16 @@
                     e.preventDefault();
                     toggleShortcutsModal();
                 }
+                // Navigation: Strg + 1-6
+                if (e.ctrlKey && e.key >= '1' && e.key <= '6') {
+                    e.preventDefault();
+                    const tabs = ['hub', 'testing', 'dataset', 'training', 'compare', 'history'];
+                    const target = tabs[parseInt(e.key) - 1];
+                    if (target) {
+                        const btn = document.querySelector(`nav button[data-target="${target}"]`);
+                        if (btn) btn.click();
+                    }
+                }
             }
         };
 
@@ -963,12 +977,56 @@
             const modal = document.getElementById('shortcutsModal');
             modal.style.display = modal.style.display === 'none' ? 'flex' : 'none';
         }
+        
+        // History Filter Functions
+        function toggleHistoryFilter() {
+            const panel = document.getElementById('historyFilterPanel');
+            panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+        }
+        
+        function applyHistoryFilter() {
+            const search = document.getElementById('historySearch').value.toLowerCase();
+            const source = document.getElementById('historySource').value;
+            loadHistory(search, source);
+        }
+        
+        function clearHistoryFilter() {
+            document.getElementById('historySearch').value = '';
+            document.getElementById('historySource').value = '';
+            document.getElementById('historyLimit').value = '50';
+            loadHistory();
+        }
+        
+        // Local Path Functions
+        async function pastePath() {
+            try {
+                const text = await navigator.clipboard.readText();
+                const input = document.getElementById('localPathInput');
+                if (input && text) {
+                    input.value = text.trim();
+                    showToast('Pfad aus Zwischenablage eingefügt', 'success');
+                }
+            } catch (err) {
+                showToast('Zugriff auf Zwischenablage nicht möglich', 'error');
+            }
+        }
+        
+        function browsePath() {
+            // Hinweis: Browser erlauben aus Sicherheitsgründen keinen direkten Dateizugriff
+            // Zeige Help-Dialog
+            showToast('Bitte Pfad aus Dateiexplorer kopieren (Rechtsklick → Kopieren)', 'info');
+        }
 
         // Initialize on load
         document.addEventListener('DOMContentLoaded', () => {
             ThemeManager.init();
             ShortcutsManager.init();
             
+            // Auto-refresh History alle 30 Sekunden
+            if (window.loadHistory) {
+                setInterval(() => loadHistory(), 30000);
+            }
+
             document.getElementById('confValue').textContent = document.getElementById('confThreshold').value;
             document.getElementById('iouValue').textContent = document.getElementById('iouThreshold').value;
             document.getElementById('sizeValue').textContent = document.getElementById('imgSize').value;
