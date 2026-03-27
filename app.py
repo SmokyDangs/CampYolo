@@ -1,4 +1,4 @@
-import os, gc, time, shutil, json, io, base64, re, subprocess, csv, numpy as np, logging, sys, traceback, flask
+import os, gc, time, shutil, json, io, base64, re, subprocess, csv, numpy as np, logging, sys, traceback, flask, yaml
 from pathlib import Path
 from datetime import datetime
 from collections import deque
@@ -545,7 +545,7 @@ def test_model():
 def normalize_local_path(path):
     """
     Normalisiert lokale Dateipfade für alle Betriebssysteme.
-    Unterstützt Windows (C:\...), Linux (/home/...), macOS (/Users/...)
+    Unterstutzt Windows (C:\\...), Linux (/home/...), macOS (/Users/...)
     """
     if not path:
         return path
@@ -1750,6 +1750,70 @@ def dataset_templates():
 # ==================== YOLO TRAINING ====================
 training_job = {"active": False, "process": None, "results": None, "logs": []}
 
+# ==================== FEW-SHOT INCREMENTAL TRAINING ====================
+fewshot_samples = {"images": [], "annotations": [], "classes": set()}
+fewshot_model = {"instance": None, "name": None, "last_trained": None}
+
+def create_yolo_dataset_from_samples(output_dir, classes_list):
+    """Erstellt ein YOLO-format Dataset aus den Few-Shot Samples"""
+    # Verzeichnisse erstellen
+    images_dir = os.path.join(output_dir, 'images')
+    labels_dir = os.path.join(output_dir, 'labels')
+    os.makedirs(images_dir, exist_ok=True)
+    os.makedirs(labels_dir, exist_ok=True)
+    
+    # Daten.yaml erstellen
+    data_yaml = {
+        'path': output_dir,
+        'train': 'images',
+        'val': 'images',
+        'names': classes_list
+    }
+    
+    with open(os.path.join(output_dir, 'data.yaml'), 'w') as f:
+        yaml.dump(data_yaml, f)
+    
+    # Bilder und Labels kopieren
+    class_to_id = {cls: i for i, cls in enumerate(classes_list)}
+    
+    for i, (img_path, annotations) in enumerate(zip(
+            fewshot_samples["images"], fewshot_samples["annotations"])):
+        # Bild kopieren
+        img_filename = f"sample_{i:04d}_{os.path.basename(img_path)}"
+        dest_img_path = os.path.join(images_dir, img_filename)
+        shutil.copy(img_path, dest_img_path)
+        
+        # Label-Datei erstellen
+        label_filename = img_filename.rsplit('.', 1)[0] + '.txt'
+        label_path = os.path.join(labels_dir, label_filename)
+        
+        # Bildgröße laden für Normalisierung
+        img_cv = cv2.imread(img_path)
+        if img_cv is None:
+            continue
+        img_h, img_w = img_cv.shape[:2]
+        
+        with open(label_path, 'w') as f:
+            for ann in annotations:
+                cls = ann.get('class', '')
+                if cls not in class_to_id:
+                    continue
+                cls_id = class_to_id[cls]
+                
+                # BBox normalisieren (YOLO Format: x_center, y_center, width, height)
+                bbox = ann.get('bbox', [])
+                if len(bbox) == 4:
+                    x1, y1, x2, y2 = bbox
+                    x_center = ((x1 + x2) / 2) / img_w
+                    y_center = ((y1 + y2) / 2) / img_h
+                    width = (x2 - x1) / img_w
+                    height = (y2 - y1) / img_h
+                    
+                    # YOLO Format: class x_center y_center width height
+                    f.write(f"{cls_id} {x_center:.6f} {y_center:.6f} {width:.6f} {height:.6f}\n")
+    
+    return data_yaml
+
 @app.route('/training/status', methods=['GET'])
 def training_status():
     """Gibt den aktuellen Training-Status zurück"""
@@ -2071,6 +2135,421 @@ def fewshot_load_clip():
                 "success": False,
                 "message": "CLIP Modell nicht verfügbar. Installiere: pip install clip-by-openai"
             }), 500
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ==================== FEW-SHOT INCREMENTAL TRAINING ENDPOINTS ====================
+
+@app.route('/fewshot/train/status', methods=['GET'])
+def fewshot_train_status():
+    """Gibt den Status des Few-Shot Trainings zurück"""
+    return jsonify({
+        "samples_count": len(fewshot_samples["images"]),
+        "classes": list(fewshot_samples["classes"]),
+        "model_trained": fewshot_model["instance"] is not None,
+        "model_name": fewshot_model["name"],
+        "last_trained": fewshot_model["last_trained"],
+        "ready_for_training": len(fewshot_samples["images"]) >= 3 and len(fewshot_samples["classes"]) > 0
+    })
+
+@app.route('/fewshot/train/add_sample', methods=['POST'])
+def fewshot_train_add_sample():
+    """Fügt ein annotiertes Sample zum Few-Shot Training hinzu"""
+    if 'image' not in request.files:
+        return jsonify({"error": "Kein Bild"}), 400
+    
+    annotations_json = request.form.get('annotations', '[]')
+    try:
+        annotations = json.loads(annotations_json)
+    except json.JSONDecodeError:
+        return jsonify({"error": "Ungültige Annotationen"}), 400
+    
+    if not annotations:
+        return jsonify({"error": "Mindestens eine Annotation erforderlich"}), 400
+    
+    file = request.files['image']
+    img_path = os.path.join(app.config['UPLOAD_FOLDER_ABS'], f"fewshot_{int(time.time()*1000)}_{file.filename}")
+    file.save(img_path)
+    
+    # Sample hinzufügen
+    fewshot_samples["images"].append(img_path)
+    fewshot_samples["annotations"].append(annotations)
+    
+    # Klassen extrahieren
+    for ann in annotations:
+        cls = ann.get('class', '')
+        if cls:
+            fewshot_samples["classes"].add(cls)
+    
+    return jsonify({
+        "success": True,
+        "sample_count": len(fewshot_samples["images"]),
+        "classes": list(fewshot_samples["classes"]),
+        "message": f"Sample hinzugefügt ({len(annotations)} Annotationen)"
+    })
+
+@app.route('/fewshot/train/clear', methods=['POST'])
+def fewshot_train_clear():
+    """Löscht alle Few-Shot Training Samples"""
+    global fewshot_samples
+    fewshot_samples = {"images": [], "annotations": [], "classes": set()}
+    return jsonify({
+        "success": True,
+        "message": "Alle Samples gelöscht"
+    })
+
+@app.route('/fewshot/train/start', methods=['POST'])
+def fewshot_train_start():
+    """Startet Few-Shot inkrementelles Training"""
+    global fewshot_model, training_job
+    
+    if training_job.get("active", False):
+        return jsonify({"error": "Training läuft bereits"}), 400
+    
+    if len(fewshot_samples["images"]) < 3:
+        return jsonify({"error": "Mindestens 3 Samples erforderlich"}), 400
+    
+    if len(fewshot_samples["classes"]) == 0:
+        return jsonify({"error": "Keine Klassen definiert"}), 400
+    
+    # Parameter auslesen
+    try:
+        epochs = int(request.form.get('epochs', 50))
+        batch = int(request.form.get('batch', 8))
+        imgsz = int(request.form.get('imgsz', 640))
+        model_name = request.form.get('model', 'yolov8n.pt')
+    except ValueError:
+        return jsonify({"error": "Ungültige Parameter"}), 400
+    
+    # Basis-Modell laden (vorhandenes oder neues)
+    base_model_path = os.path.join(app.config['MODEL_DIR'], model_name)
+    if not os.path.exists(base_model_path):
+        return jsonify({"error": f"Modell {model_name} nicht gefunden"}), 404
+    
+    # Dataset aus Samples erstellen
+    dataset_dir = os.path.join(app.config['UPLOAD_FOLDER_ABS'], f"fewshot_dataset_{int(time.time())}")
+    classes_list = list(fewshot_samples["classes"])
+    
+    try:
+        create_yolo_dataset_from_samples(dataset_dir, classes_list)
+    except Exception as e:
+        return jsonify({"error": f"Dataset Erstellung fehlgeschlagen: {str(e)}"}), 500
+    
+    # Training in separatem Thread starten
+    def run_fewshot_training():
+        global fewshot_model, training_job
+        training_job["logs"] = []
+        training_job["active"] = True
+        start_time = time.time()
+        
+        try:
+            from ultralytics import YOLO
+            
+            # Modell laden
+            training_job["logs"].append({"type": "info", "message": f"Lade Modell: {model_name}"})
+            model = YOLO(base_model_path)
+            
+            # data.yaml Pfad
+            data_yaml_path = os.path.join(dataset_dir, 'data.yaml')
+            
+            training_job["logs"].append({
+                "type": "info", 
+                "message": f"Starte Few-Shot Training: {epochs} Epochen, {len(fewshot_samples['images'])} Samples, {len(classes_list)} Klassen"
+            })
+            
+            # Callbacks für Training-Fortschritt
+            def on_train_epoch_end(trainer):
+                if not training_job["active"]:
+                    trainer.stop = True
+                    return
+                
+                epoch = trainer.epoch + 1
+                metrics = trainer.metrics
+                map50 = metrics.get('metrics/mAP50(B)', metrics.get('metrics/mAP50', 0))
+                loss = metrics.get('train/box_loss', metrics.get('loss', 0))
+                
+                training_job["logs"].append({
+                    "type": "info",
+                    "message": f"Epoch {epoch}/{epochs}: mAP50={map50:.4f}, Loss={loss:.4f}"
+                })
+            
+            model.add_callback("on_train_epoch_end", on_train_epoch_end)
+            
+            # Training starten
+            results = model.train(
+                data=data_yaml_path,
+                epochs=epochs,
+                batch=batch,
+                imgsz=imgsz,
+                project=app.config['UPLOAD_FOLDER_ABS'],
+                name=f"fewshot_{int(time.time())}",
+                exist_ok=True,
+                verbose=False,
+                device=DEVICE,
+                patience=10,
+                augment=True,
+                cache=False
+            )
+            
+            # Trainiertes Modell speichern
+            trained_model_name = f"fewshot_{model_name.rsplit('.', 1)[0]}_{int(time.time())}.pt"
+            trained_model_path = os.path.join(app.config['MODEL_DIR'], trained_model_name)
+            
+            # Bestes Modell kopieren
+            best_model_path = str(Path(results.save_dir) / 'weights' / 'best.pt')
+            if os.path.exists(best_model_path):
+                shutil.copy(best_model_path, trained_model_path)
+                
+                # Modell im Speicher laden
+                fewshot_model["instance"] = YOLO(trained_model_path)
+                fewshot_model["name"] = trained_model_name
+                fewshot_model["last_trained"] = datetime.now().isoformat()
+                
+                training_job["results"] = {
+                    "map50": float(results.results_dict.get('metrics/mAP50(B)', results.results_dict.get('metrics/mAP50', 0))),
+                    "map95": float(results.results_dict.get('metrics/mAP50-95(B)', results.results_dict.get('metrics/mAP50-95', 0))),
+                    "epochs": epochs,
+                    "samples_count": len(fewshot_samples["images"]),
+                    "classes": classes_list,
+                    "training_time": time.time() - start_time,
+                    "model_path": trained_model_path,
+                    "model_name": trained_model_name
+                }
+                
+                training_job["logs"].append({
+                    "type": "success", 
+                    "message": f"Training abgeschlossen! mAP50: {training_job['results']['map50']:.4f}"
+                })
+                training_job["logs"].append({
+                    "type": "success",
+                    "message": f"Modell gespeichert als: {trained_model_name}"
+                })
+            else:
+                training_job["logs"].append({"type": "error", "message": "Trainiertes Modell nicht gefunden"})
+                
+        except Exception as e:
+            training_job["logs"].append({"type": "error", "message": str(e)})
+            logger.error(f"Few-Shot Training Fehler: {str(e)}")
+            logger.error(f"Stacktrace:\n{traceback.format_exc()}")
+        finally:
+            training_job["active"] = False
+    
+    # Thread starten
+    import threading
+    thread = threading.Thread(target=run_fewshot_training)
+    thread.daemon = True
+    thread.start()
+    
+    return jsonify({
+        "status": "Few-Shot Training gestartet",
+        "epochs": epochs,
+        "samples": len(fewshot_samples["images"]),
+        "classes": classes_list
+    })
+
+@app.route('/fewshot/train/incremental', methods=['POST'])
+def fewshot_train_incremental():
+    """Fügt neue Samples hinzu und setzt Training fort"""
+    # Gleiche Logik wie start, aber behält das vorherige Modell bei
+    global fewshot_model, training_job
+    
+    if training_job.get("active", False):
+        return jsonify({"error": "Training läuft bereits"}), 400
+    
+    if len(fewshot_samples["images"]) < 3:
+        return jsonify({"error": "Mindestens 3 Samples erforderlich"}), 400
+    
+    # Parameter auslesen
+    try:
+        epochs = int(request.form.get('epochs', 30))
+        batch = int(request.form.get('batch', 8))
+        imgsz = int(request.form.get('imgsz', 640))
+    except ValueError:
+        return jsonify({"error": "Ungültige Parameter"}), 400
+    
+    # Vorheriges Modell verwenden oder Basis-Modell
+    if fewshot_model["instance"] is not None:
+        base_model_path = fewshot_model["model_path"]
+        model_name = fewshot_model["name"]
+        training_job["logs"].append({"type": "info", "message": f"Setze Training fort mit: {model_name}"})
+    else:
+        model_name = request.form.get('model', 'yolov8n.pt')
+        base_model_path = os.path.join(app.config['MODEL_DIR'], model_name)
+    
+    if not os.path.exists(base_model_path):
+        return jsonify({"error": f"Modell {model_name} nicht gefunden"}), 404
+    
+    # Dataset aktualisieren
+    dataset_dir = os.path.join(app.config['UPLOAD_FOLDER_ABS'], f"fewshot_incremental_{int(time.time())}")
+    classes_list = list(fewshot_samples["classes"])
+    
+    try:
+        create_yolo_dataset_from_samples(dataset_dir, classes_list)
+    except Exception as e:
+        return jsonify({"error": f"Dataset Erstellung fehlgeschlagen: {str(e)}"}), 500
+    
+    # Training in separatem Thread (gleiche Logik wie start)
+    def run_incremental_training():
+        global fewshot_model, training_job
+        training_job["logs"] = []
+        training_job["active"] = True
+        start_time = time.time()
+        
+        try:
+            from ultralytics import YOLO
+            
+            model = YOLO(base_model_path)
+            data_yaml_path = os.path.join(dataset_dir, 'data.yaml')
+            
+            training_job["logs"].append({
+                "type": "info",
+                "message": f"Starte inkrementelles Training: {epochs} Epochen, {len(fewshot_samples['images'])} Samples"
+            })
+            
+            def on_train_epoch_end(trainer):
+                if not training_job["active"]:
+                    trainer.stop = True
+                    return
+                epoch = trainer.epoch + 1
+                metrics = trainer.metrics
+                map50 = metrics.get('metrics/mAP50(B)', 0)
+                loss = metrics.get('train/box_loss', 0)
+                training_job["logs"].append({
+                    "type": "info",
+                    "message": f"Epoch {epoch}/{epochs}: mAP50={map50:.4f}, Loss={loss:.4f}"
+                })
+            
+            model.add_callback("on_train_epoch_end", on_train_epoch_end)
+            
+            results = model.train(
+                data=data_yaml_path,
+                epochs=epochs,
+                batch=batch,
+                imgsz=imgsz,
+                project=app.config['UPLOAD_FOLDER_ABS'],
+                name=f"incremental_{int(time.time())}",
+                exist_ok=True,
+                verbose=False,
+                device=DEVICE,
+                patience=10,
+                augment=True
+            )
+            
+            # Modell speichern
+            trained_model_name = f"fewshot_{model_name.rsplit('.', 1)[0]}_{int(time.time())}.pt"
+            trained_model_path = os.path.join(app.config['MODEL_DIR'], trained_model_name)
+            
+            best_model_path = str(Path(results.save_dir) / 'weights' / 'best.pt')
+            if os.path.exists(best_model_path):
+                shutil.copy(best_model_path, trained_model_path)
+                fewshot_model["instance"] = YOLO(trained_model_path)
+                fewshot_model["name"] = trained_model_name
+                fewshot_model["last_trained"] = datetime.now().isoformat()
+                fewshot_model["model_path"] = trained_model_path
+                
+                training_job["results"] = {
+                    "map50": float(results.results_dict.get('metrics/mAP50(B)', 0)),
+                    "map95": float(results.results_dict.get('metrics/mAP50-95(B)', 0)),
+                    "epochs": epochs,
+                    "samples_count": len(fewshot_samples["images"]),
+                    "classes": classes_list,
+                    "training_time": time.time() - start_time,
+                    "model_path": trained_model_path,
+                    "model_name": trained_model_name
+                }
+                
+                training_job["logs"].append({"type": "success", "message": f"Inkrementelles Training abgeschlossen! mAP50: {training_job['results']['map50']:.4f}"})
+                
+        except Exception as e:
+            training_job["logs"].append({"type": "error", "message": str(e)})
+        finally:
+            training_job["active"] = False
+    
+    import threading
+    thread = threading.Thread(target=run_incremental_training)
+    thread.daemon = True
+    thread.start()
+    
+    return jsonify({
+        "status": "Inkrementelles Training gestartet",
+        "epochs": epochs,
+        "samples": len(fewshot_samples["images"])
+    })
+
+@app.route('/fewshot/train/download', methods=['GET'])
+def fewshot_train_download():
+    """Lädt das trainierte Few-Shot Modell herunter"""
+    if not fewshot_model["instance"] or not fewshot_model.get("model_path"):
+        return jsonify({"error": "Kein trainiertes Modell verfügbar"}), 404
+    
+    model_path = fewshot_model.get("model_path")
+    if not os.path.exists(model_path):
+        return jsonify({"error": "Modell-Datei nicht gefunden"}), 404
+    
+    return send_file(model_path, as_attachment=True, download_name=fewshot_model["name"])
+
+@app.route('/fewshot/predict', methods=['POST'])
+def fewshot_predict():
+    """Führt Inferenz mit dem Few-Shot Modell durch"""
+    if not fewshot_model["instance"]:
+        return jsonify({"error": "Kein Few-Shot Modell geladen"}), 400
+    
+    if 'image' not in request.files:
+        return jsonify({"error": "Kein Bild"}), 400
+    
+    file = request.files['image']
+    img_path = os.path.join(app.config['UPLOAD_FOLDER_ABS'], f"predict_{int(time.time()*1000)}_{file.filename}")
+    file.save(img_path)
+    
+    try:
+        # Inferenz durchführen
+        results = fewshot_model["instance"](img_path, conf=0.25, iou=0.45)
+        
+        detections = []
+        image_cv = cv2.imread(img_path)
+        img_h, img_w = image_cv.shape[:2]
+        
+        for r in results:
+            if r.boxes is not None and len(r.boxes) > 0:
+                for i, box in enumerate(r.boxes):
+                    cls_id = int(box.cls[0]) if box.cls is not None else -1
+                    conf_val = float(box.conf[0]) if box.conf is not None else 0
+                    bbox = [round(x, 2) for x in box.xyxy[0].tolist()] if box.xyxy is not None else []
+                    
+                    detections.append({
+                        "class": r.names.get(cls_id, "unknown"),
+                        "class_id": cls_id,
+                        "confidence": conf_val,
+                        "bbox": bbox,
+                        "bbox_normalized": [
+                            bbox[0] / img_w if len(bbox) > 0 else 0,
+                            bbox[1] / img_h if len(bbox) > 1 else 0,
+                            bbox[2] / img_w if len(bbox) > 2 else 0,
+                            bbox[3] / img_h if len(bbox) > 3 else 0
+                        ]
+                    })
+        
+        # Annotiertes Bild erstellen
+        for det in detections:
+            bbox = det["bbox"]
+            if len(bbox) == 4:
+                x1, y1, x2, y2 = [int(c) for c in bbox]
+                cv2.rectangle(image_cv, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                cv2.putText(image_cv, f"{det['class']} {det['confidence']:.2f}",
+                           (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+        
+        annotated_filename = f"predict_annotated_{int(time.time()*1000)}_{os.path.basename(img_path)}"
+        annotated_path = os.path.join(app.config['UPLOAD_FOLDER_ABS'], annotated_filename)
+        cv2.imwrite(annotated_path, image_cv)
+        
+        return jsonify({
+            "success": True,
+            "detections": detections,
+            "detection_count": len(detections),
+            "annotated_image": f"/uploads/{annotated_filename}",
+            "model_used": fewshot_model["name"]
+        })
+        
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

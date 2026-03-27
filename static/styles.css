@@ -3913,14 +3913,367 @@ html {
     .theme-toggle, aside, .btn, .ghost, .action {
         display: none !important;
     }
-    
+
     main {
         padding: 0;
     }
-    
+
     .card {
         break-inside: avoid;
         box-shadow: none;
         border: 1px solid #000;
     }
+}
+
+/* ==================== Few-Shot Training Styles ==================== */
+
+/* Annotation Modal */
+.annotation-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.85);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+    animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+.annotation-modal-content {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    max-width: 900px;
+    width: 90%;
+    max-height: 90vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.annotation-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+}
+
+.annotation-modal-header h4 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.close-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 24px;
+    cursor: pointer;
+    padding: 4px;
+    line-height: 1;
+}
+
+.close-btn:hover {
+    color: var(--text-primary);
+}
+
+.annotation-modal-body {
+    display: flex;
+    flex-direction: column;
+    padding: 20px;
+    overflow: auto;
+}
+
+.annotation-canvas-wrapper {
+    background: var(--bg-primary);
+    border-radius: 8px;
+    overflow: auto;
+    max-height: 50vh;
+    display: flex;
+    justify-content: center;
+}
+
+#annotationCanvas {
+    cursor: crosshair;
+    max-width: 100%;
+}
+
+.annotation-controls {
+    margin-top: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.class-input {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.class-input label {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-secondary);
+}
+
+.class-input input {
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 14px;
+}
+
+.class-input input:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+}
+
+.annotation-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+/* Samples Grid */
+.samples-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 12px;
+}
+
+.sample-card {
+    position: relative;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    transition: transform 0.2s, border-color 0.2s;
+}
+
+.sample-card:hover {
+    transform: translateY(-2px);
+    border-color: var(--accent-primary);
+}
+
+.sample-card img {
+    width: 100%;
+    height: 120px;
+    object-fit: cover;
+}
+
+.sample-info {
+    padding: 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+}
+
+.sample-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.sample-badges .badge {
+    font-size: 10px;
+    padding: 2px 6px;
+    background: var(--accent-primary);
+    color: white;
+    border-radius: 4px;
+    font-weight: 500;
+}
+
+.sample-count {
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.sample-remove {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: rgba(239, 68, 68, 0.9);
+    border: none;
+    color: white;
+    font-size: 14px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+
+.sample-card:hover .sample-remove {
+    opacity: 1;
+}
+
+.sample-remove:hover {
+    background: var(--error);
+}
+
+/* Classes List */
+.classes-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    min-height: 40px;
+}
+
+.class-chip {
+    font-size: 12px;
+    padding: 4px 10px;
+    background: var(--accent-gradient);
+    color: white;
+    border-radius: 16px;
+    font-weight: 500;
+}
+
+/* Few-Shot Progress Stats */
+#fewshotResults .result-card {
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    text-align: center;
+}
+
+#fewshotResults .result-value {
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--accent-primary);
+    margin-bottom: 4px;
+}
+
+#fewshotResults .result-label {
+    font-size: 12px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* Modern Dropzone Enhanced */
+.modern-dropzone {
+    padding: 32px;
+    border: 2px dashed var(--border);
+    border-radius: 12px;
+    background: var(--bg-primary);
+    transition: all 0.3s ease;
+    cursor: pointer;
+}
+
+.modern-dropzone:hover {
+    border-color: var(--accent-primary);
+    background: rgba(99, 102, 241, 0.05);
+}
+
+.modern-dropzone.dragover {
+    border-color: var(--accent-primary);
+    background: rgba(99, 102, 241, 0.1);
+    box-shadow: 0 0 20px rgba(99, 102, 241, 0.3);
+    transform: scale(1.02);
+}
+
+.dropzone-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+}
+
+.dropzone-icon-wrapper {
+    width: 48px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--accent-gradient-subtle);
+    border-radius: 50%;
+}
+
+.dropzone-icon {
+    width: 24px;
+    height: 24px;
+    color: var(--accent-primary);
+}
+
+.dropzone-text {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-primary);
+    margin: 0;
+}
+
+.dropzone-hint {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin: 0;
+}
+
+/* Button Variants */
+.btn-sm {
+    padding: 6px 12px;
+    font-size: 13px;
+}
+
+.btn-block {
+    width: 100%;
+}
+
+.btn-large {
+    padding: 14px 24px;
+    font-size: 15px;
+}
+
+.btn-primary {
+    background: var(--accent-gradient);
+    color: white;
+    border: none;
+}
+
+.btn-primary:hover {
+    background: var(--accent-gradient-hover);
+}
+
+.btn-success {
+    background: linear-gradient(135deg, var(--success) 0%, var(--success-light) 100%);
+    color: white;
+    border: none;
+}
+
+.btn-success:hover {
+    filter: brightness(1.1);
+}
+
+/* Toast Notification */
+@keyframes slideIn {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+.toast-notification {
+    animation: slideIn 0.3s ease;
 }

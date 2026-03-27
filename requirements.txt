@@ -5,3 +5,5 @@ opencv-python>=4.8.0
 requests
 tqdm
 psutil
+pyyaml
+Pillow
